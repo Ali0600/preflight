@@ -1,0 +1,5 @@
+# a comment line
+requests==2.31.0
+flask>=2.0          # unpinned range, inline comment
+-r other-requirements.txt
+django == 4.2.1

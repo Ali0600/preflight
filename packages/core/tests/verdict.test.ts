@@ -56,3 +56,42 @@ describe('decideVerdict', () => {
     expect(r.verdict).toBe('safe');
   });
 });
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+describe('decideVerdict — stale', () => {
+  const base = {
+    name: 'left-pad',
+    range: '^1.0.0',
+    version: '1.3.0',
+    dev: false,
+    vulns: [],
+    lockstep: { pinned: false as const },
+  };
+
+  it('major(s) behind AND old last-publish -> stale', () => {
+    const r = decideVerdict({ ...base, latest: '3.0.0', lastPublish: daysAgo(800) });
+    expect(r.verdict).toBe('stale');
+    expect(r.reason).toContain('3.0.0');
+  });
+
+  it('major behind but recently published -> safe', () => {
+    const r = decideVerdict({ ...base, latest: '3.0.0', lastPublish: daysAgo(30) });
+    expect(r.verdict).toBe('safe');
+  });
+
+  it('same major (only minor behind) -> safe even if old', () => {
+    const r = decideVerdict({ ...base, version: '1.9.0', latest: '1.9.5', lastPublish: daysAgo(800) });
+    expect(r.verdict).toBe('safe');
+  });
+
+  it('without --latest data (no latest/lastPublish) -> safe', () => {
+    const r = decideVerdict(base);
+    expect(r.verdict).toBe('safe');
+  });
+
+  it('a CVE still wins over stale', () => {
+    const r = decideVerdict({ ...base, vulns: med, latest: '3.0.0', lastPublish: daysAgo(800) });
+    expect(r.verdict).toBe('cve');
+  });
+});

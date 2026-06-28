@@ -1,0 +1,8 @@
+# Example pip manifest for `preflight check examples/requirements.txt`.
+# Deliberately mixes deliberately-old pinned packages (to surface CVEs / staleness)
+# with a current one, so the verdicts are easy to eyeball.
+requests==2.19.1
+urllib3==1.24.1
+jinja2==2.10
+pyyaml==5.3.1
+rich==13.7.1

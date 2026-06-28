@@ -43,6 +43,10 @@ export interface Finding {
   vulns: Vuln[];
   lockstep: LockstepInfo;
   latest?: string;
+  /** ISO timestamp of the dep's most recent publish (drives the `stale` verdict). */
+  lastPublish?: string;
+  /** OpenSSF Scorecard (0–10) from deps.dev, when `--health` is requested. */
+  health?: number;
   verdict: Verdict;
   reason: string;
 }
