@@ -67,5 +67,16 @@ practices this tool automates.
 ## Data sources (all free, no API keys)
 OSV.dev · deps.dev (v3) · npm registry · PyPI JSON · endoflife.date
 
+## Experience Gained
+- Designed a keyless supply-chain analysis **engine** (TypeScript, ESM npm-workspaces monorepo) over
+  the OSV, deps.dev, npm, and PyPI APIs — batched queries, a 24h on-disk cache, and a CVSS v3
+  base-score calculator — shipped as a standalone **CLI** bundled with tsup.
+- Built a **CI/CD security gate** as a GitHub Action (`@actions/*` toolkit + Octokit) that diffs
+  dependency changes on each pull request, posts an automated review comment, and fails the check on
+  a newly-introduced CVE — self-tested by running on its own PRs.
+- Modeled framework **lockstep** version sets (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix,
+  Astro) to produce upgrade guidance generic auto-updaters can't, and verified every external API
+  shape against live docs before coding.
+
 ## License
 MIT (intended).

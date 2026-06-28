@@ -58,7 +58,8 @@ are speced in `docs/`. **Stage 2 is now built** (the Action); Stage 3 (web) is n
   `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
-## Résumé framing
-"Built a supply-chain pre-flight tool (CLI + GitHub Action + dashboard) that scores dependency
-health and CVE exposure via the OSV and deps.dev APIs, flags framework-lockstep packages unsafe to
-auto-update, generates SBOMs, and gates pull requests."
+## Experience Gained
+Accomplishment-style phrasing for what's built lives in the README's **Experience Gained** section —
+keep it accurate (engine + CLI + GitHub Action are real; SBOM generation and the web dashboard are
+not built yet) and separate from Features/Highlights. Don't add a "Résumé"-labelled section to
+committed docs.
