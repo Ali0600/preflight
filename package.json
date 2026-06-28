@@ -1,0 +1,26 @@
+{
+  "name": "preflight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency pre-flight: score health, CVE exposure, and auto-update safety before you add or bump a dependency.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "tsx packages/cli/src/index.ts check",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@preflight/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Preflight CLI: pre-flight a dependency manifest for CVEs, framework-lockstep, and auto-update safety.",
+  "bin": {
+    "preflight": "./src/index.ts"
+  },
+  "dependencies": {
+    "@preflight/core": "*",
+    "commander": "^12.1.0",
+    "picocolors": "^1.1.1"
+  }
+}
