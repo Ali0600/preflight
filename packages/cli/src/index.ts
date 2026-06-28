@@ -1,4 +1,5 @@
-import { analyze, type Report, type Verdict } from '@preflight/core';
+#!/usr/bin/env node
+import { analyze, setCacheEnabled, type Report, type Verdict } from '@preflight/core';
 import { Command } from 'commander';
 import pc from 'picocolors';
 
@@ -17,14 +18,19 @@ function printReport(r: Report): void {
   console.log(pc.bold(`Preflight — ${r.path}`));
   console.log(
     pc.dim(
-      `${r.total} deps · ${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.safe} safe`,
+      `${r.total} deps · ${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
   console.log();
   for (const f of [...r.findings].sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict])) {
     const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(6));
-    console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}`);
+    const latest =
+      f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
+    console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}`);
     console.log(`          ${pc.dim(f.reason)}`);
+    if (f.health !== undefined) {
+      console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}`);
+    }
   }
   console.log();
 }
@@ -40,23 +46,31 @@ program
   .command('check')
   .argument('[path]', 'path to package.json or requirements*.txt', 'package.json')
   .option('--json', 'output the raw report as JSON')
-  .option('--latest', "also fetch each dependency's latest published version")
-  .action(async (path: string, opts: { json?: boolean; latest?: boolean }) => {
-    let report: Report;
-    try {
-      report = await analyze(path, { latest: opts.latest });
-    } catch (err) {
-      console.error(pc.red(`preflight: ${(err as Error).message}`));
-      process.exitCode = 1;
-      return;
-    }
-    if (opts.json) {
-      console.log(JSON.stringify(report, null, 2));
-    } else {
-      printReport(report);
-    }
-    // Non-zero exit when any dependency carries a CVE, so CI can gate on it.
-    if (report.summary.cve > 0) process.exitCode = 1;
-  });
+  .option('--latest', "fetch each dep's latest version + last-publish date (enables 'stale')")
+  .option('--health', "fetch each dep's OpenSSF Scorecard from deps.dev")
+  .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
+  .action(
+    async (
+      path: string,
+      opts: { json?: boolean; latest?: boolean; health?: boolean; cache?: boolean },
+    ) => {
+      if (opts.cache === false) setCacheEnabled(false);
+      let report: Report;
+      try {
+        report = await analyze(path, { latest: opts.latest, health: opts.health });
+      } catch (err) {
+        console.error(pc.red(`preflight: ${(err as Error).message}`));
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printReport(report);
+      }
+      // Non-zero exit when any dependency carries a CVE, so CI can gate on it.
+      if (report.summary.cve > 0) process.exitCode = 1;
+    },
+  );
 
 await program.parseAsync();

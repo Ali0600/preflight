@@ -31,6 +31,40 @@ export const FRAMEWORK_SETS: FrameworkSet[] = [
     exact: ['nx'],
     prefixes: ['@nx/', '@nrwl/'],
   },
+  {
+    // Next coordinates its own packages; `react`/`react-dom` are intentionally left out
+    // (Next supports independent React bumps within its range, and Expo already claims them).
+    framework: 'Next.js',
+    tool: 'npx @next/codemod upgrade',
+    exact: ['next', 'eslint-config-next'],
+    prefixes: ['@next/'],
+  },
+  {
+    framework: 'Nuxt',
+    tool: 'npx nuxi upgrade',
+    exact: ['nuxt'],
+    prefixes: ['@nuxt/', '@nuxtjs/'],
+  },
+  {
+    // `@sveltejs/kit` + adapters/plugins move together; bare `svelte` is omitted because
+    // plenty of projects use Svelte without SvelteKit and it versions independently.
+    framework: 'SvelteKit',
+    tool: 'npx sv migrate',
+    exact: [],
+    prefixes: ['@sveltejs/'],
+  },
+  {
+    framework: 'Remix',
+    tool: 'bump all @remix-run/* to the same version',
+    exact: [],
+    prefixes: ['@remix-run/'],
+  },
+  {
+    framework: 'Astro',
+    tool: 'npx @astrojs/upgrade',
+    exact: ['astro'],
+    prefixes: ['@astrojs/'],
+  },
 ];
 
 /** Classify a package name against the framework-lockstep registry. */

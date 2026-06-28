@@ -19,9 +19,23 @@ describe('lockstepFor', () => {
     expect(lockstepFor('@nx/workspace')).toMatchObject({ framework: 'Nx' });
   });
 
+  it('flags the JS framework sets with the right tool', () => {
+    expect(lockstepFor('next')).toMatchObject({ framework: 'Next.js' });
+    expect(lockstepFor('eslint-config-next').pinned).toBe(true);
+    expect(lockstepFor('@next/font').pinned).toBe(true);
+    expect(lockstepFor('nuxt')).toMatchObject({ framework: 'Nuxt', tool: 'npx nuxi upgrade' });
+    expect(lockstepFor('@nuxt/kit').pinned).toBe(true);
+    expect(lockstepFor('@sveltejs/kit')).toMatchObject({ framework: 'SvelteKit' });
+    expect(lockstepFor('@remix-run/node')).toMatchObject({ framework: 'Remix' });
+    expect(lockstepFor('astro')).toMatchObject({ framework: 'Astro', tool: 'npx @astrojs/upgrade' });
+    expect(lockstepFor('@astrojs/react').pinned).toBe(true);
+  });
+
   it('leaves independent packages unpinned', () => {
     expect(lockstepFor('fastapi').pinned).toBe(false);
     expect(lockstepFor('lodash').pinned).toBe(false);
     expect(lockstepFor('react-query').pinned).toBe(false); // starts with "react" but not a set member
+    expect(lockstepFor('svelte').pinned).toBe(false); // bare svelte ≠ SvelteKit-pinned
+    expect(lockstepFor('next-auth').pinned).toBe(false); // starts with "next" but not a member
   });
 });

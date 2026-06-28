@@ -9,19 +9,22 @@ knowing which packages a framework pins as a coordinated set, so the tool can sa
 auto-bump this — use `npx expo install`."
 
 ## Status
-Stage 1 (CLI) is a **working vertical slice**: manifest → OSV vulns + lockstep → verdict → table.
-Stages 2 (GitHub Action) and 3 (web dashboard) are speced in `docs/` but not built. **Start from
-[docs/kickoff.md](docs/kickoff.md).** Full plan: [docs/roadmap.md](docs/roadmap.md),
+Stage 1 (CLI) is **complete**: manifest → OSV vulns (+ CVSS-derived severity) + lockstep → verdict
+→ table, with a 24h disk cache, `--latest` (latest version + `stale` verdict), `--health` (deps.dev
+Scorecard), and a `tsup` build to a standalone `dist`. Stages 2 (GitHub Action) and 3 (web dashboard)
+are speced in `docs/` but not built. Full plan: [docs/roadmap.md](docs/roadmap.md),
 [docs/spec.md](docs/spec.md).
 
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ lockfile versions) / requirements.txt
   - `osv.ts` — OSV.dev client (querybatch for presence, then vuln details)
-  - `registry.ts` — latest version (npm registry / PyPI)
+  - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
+  - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
+  - `registry.ts` — latest version + last-publish date (npm registry / PyPI)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard (2-hop; wired behind `--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
-  - `verdict.ts` — combine → `safe | pinned | cve | stale`
+  - `verdict.ts` — combine → `safe | pinned | cve | stale` (`stale` needs `--latest` data)
   - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report`
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
 - `packages/action` — Stage 2 (not built yet)
@@ -29,20 +32,28 @@ Stages 2 (GitHub Action) and 3 (web dashboard) are speced in `docs/` but not bui
 
 ## Commands
 - Install: `npm install`
-- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--latest`)
-- Test: `npm test` (vitest — pure logic in `lockstep`/`verdict`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
-- Demo: `npm run check -- ~/grocery-helper/mobile/package.json` → 9 Expo-pinned, 8 safe, 0 CVE.
+- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--latest`, `--health`, `--no-cache`)
+- Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
+- Build: `npm run build` (tsup → `dist`; CLI is a standalone bundle, runs via `node packages/cli/dist/index.js`)
+- Demo: `npm run check -- ~/grocery-helper/mobile/package.json` → 10 Expo-pinned, 7 safe, 0 CVE.
+  `npm run check -- examples/requirements.txt --latest` → 4 CVE, 1 safe (exit 1).
 
 ## Conventions / gotchas
 - **All logic lives in `@preflight/core`**; CLI/Action/web are thin wrappers — never duplicate.
-- `@preflight/core` exports `./src/index.ts` directly (no build step in the seed; tsx/vitest/tsc
-  resolve TS via the workspace symlink). A publish build (tsup → `dist`) is a stage-1 polish task.
+- `@preflight/core` still exports `./src/index.ts` directly (zero-build dev loop: tsx/vitest/tsc
+  resolve TS via the workspace symlink). The publishable CLI is built by **bundling** core into it
+  (`tsup` `noExternal: ['@preflight/core']`), because **npm's `publishConfig` can't repoint
+  `main`/`exports`/`bin`** (only pnpm/yarn can — npm/cli#7586). So don't try to publish core by
+  swapping its exports to `dist`; bundle the consumer instead, or wait for a real core publish step.
 - **Verify API shapes against the live docs before trusting them** — OSV
-  (https://google.github.io/osv.dev/api/), deps.dev (https://docs.deps.dev/api/v3/). Don't assert
-  response formats from memory; that bit the previous project. `depsdev.ts` especially is unverified.
+  (https://google.github.io/osv.dev/api/), deps.dev (https://docs.deps.dev/api/v3/). OSV + deps.dev +
+  npm + PyPI shapes are now **verified** (deps.dev needs UPPERCASE `NPM`/`PYPI` in the path, and the
+  scorecard hangs off the `SOURCE_REPO` related project — both handled in `depsdev.ts`).
 - All APIs are **keyless** — never hardcode secrets. GitHub OAuth (stage 3) is deferred config.
-- **The lockstep registry is data-driven** so it's trivial to extend (Expo/Angular/Nx are seeded;
-  add Next/SvelteKit and pip/gem framework sets — Django, Rails). Extending it *is* much of the roadmap.
+- **The lockstep registry is data-driven** so it's trivial to extend (Expo/Angular/Nx + Next.js/Nuxt/
+  SvelteKit/Remix/Astro are seeded). Next to add: pip (Django) — and gem (Rails) once a Gemfile parser
+  exists, else that data is dead. Be conservative: a false `pinned` is bad advice (we omit bare
+  `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
 ## Résumé framing
