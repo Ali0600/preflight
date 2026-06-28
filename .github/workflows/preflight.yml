@@ -1,0 +1,23 @@
+name: Preflight
+
+# Pre-flight dependency changes on every PR. Uses the local action so the workflow
+# also exercises Preflight against its own PRs (it comments on this one).
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Pre-flight dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./packages/action

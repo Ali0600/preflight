@@ -1,0 +1,18 @@
+name: 'Preflight'
+description: "Pre-flight a PR's dependency changes: CVEs (OSV), framework-lockstep status, and auto-update safety."
+author: 'Ali Hassan'
+branding:
+  icon: 'shield'
+  color: 'purple'
+inputs:
+  github-token:
+    description: 'Token used to read the PR diff and post the comment.'
+    required: false
+    default: ${{ github.token }}
+  fail-on-cve:
+    description: 'Fail the check when the PR introduces a dependency with a known CVE.'
+    required: false
+    default: 'true'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

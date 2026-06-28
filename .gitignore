@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# The GitHub Action runs from committed code (no install step), so its bundle is tracked.
+!packages/action/dist/
+!packages/action/dist/**
 coverage/
 *.log
 .DS_Store
