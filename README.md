@@ -27,7 +27,9 @@ per-package updater break your build.
 1. **CLI** (`@preflight/cli`) — `preflight check <manifest>` → a verdict table (`safe` / `pinned` /
    `cve` / `stale`), with `--latest` (latest version + staleness), `--health` (OpenSSF Scorecard),
    `--json`, and `--no-cache`. **Working today.**
-2. **GitHub Action** (`@preflight/action`) — comments on PRs that add or bump a dependency.
+2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the changed manifests and posts a
+   sticky comment with the verdicts for added/bumped deps; fails the check on a newly-introduced
+   CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
 3. **Web dashboard** (`@preflight/web`, Next.js) — paste a manifest or connect a repo → the
    dashboard in [docs/dashboard-mockup.html](docs/dashboard-mockup.html). Deploy on Vercel.
 
