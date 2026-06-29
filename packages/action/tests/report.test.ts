@@ -1,0 +1,100 @@
+import type { Finding, Report, Verdict } from '@preflight/core';
+import { describe, expect, it } from 'vitest';
+
+import {
+  diffDeclared,
+  newCveCount,
+  renderComment,
+  MARKER,
+  type ManifestReport,
+} from '../src/report';
+
+function finding(name: string, verdict: Verdict, range = '^1.0.0'): Finding {
+  return {
+    name,
+    range,
+    version: range.replace('^', ''),
+    dev: false,
+    vulns: verdict === 'cve' ? [{ id: 'GHSA-x', summary: 's', severity: 'high' }] : [],
+    lockstep: { pinned: verdict === 'pinned', framework: 'Expo', tool: 'npx expo install' },
+    verdict,
+    reason: `${verdict} reason`,
+  };
+}
+
+function report(findings: Finding[]): Report {
+  const summary = { safe: 0, pinned: 0, cve: 0, stale: 0 };
+  for (const f of findings) summary[f.verdict] += 1;
+  return { ecosystem: 'npm', path: 'package.json', total: findings.length, findings, summary };
+}
+
+describe('diffDeclared', () => {
+  it('marks added and bumped deps, ignores unchanged', () => {
+    const base = [{ name: 'a', range: '^1' }];
+    const head = [
+      { name: 'a', range: '^2' }, // bumped
+      { name: 'b', range: '^1' }, // added
+    ];
+    const changes = diffDeclared(base, head);
+    expect(changes.get('a')).toBe('bumped');
+    expect(changes.get('b')).toBe('added');
+  });
+
+  it('treats every dep as added when there is no base manifest', () => {
+    const changes = diffDeclared([], [{ name: 'a', range: '^1' }]);
+    expect(changes.get('a')).toBe('added');
+  });
+});
+
+describe('newCveCount', () => {
+  it('counts only added/bumped deps that carry a CVE', () => {
+    const r = report([finding('a', 'cve'), finding('b', 'cve'), finding('c', 'safe')]);
+    const changes = new Map([
+      ['a', 'added'],
+      ['c', 'added'],
+    ] as const);
+    // `b` has a CVE but isn't part of this PR's changes → not counted.
+    expect(newCveCount([{ path: 'package.json', report: r, changes }])).toBe(1);
+  });
+});
+
+describe('renderComment', () => {
+  const withCve: ManifestReport = {
+    path: 'package.json',
+    report: report([finding('left-pad', 'cve'), finding('untouched', 'cve'), finding('ok', 'safe')]),
+    changes: new Map([
+      ['left-pad', 'added'],
+      ['ok', 'added'],
+    ] as const),
+  };
+
+  it('includes the marker and only the changed deps', () => {
+    const body = renderComment([withCve]);
+    expect(body).toContain(MARKER);
+    expect(body).toContain('left-pad');
+    expect(body).toContain('| 🟥 CVE |');
+    expect(body).not.toContain('untouched'); // changed-deps only
+  });
+
+  it('flags introduced CVEs in the footer', () => {
+    expect(renderComment([withCve])).toContain('introduces 1 dependency with a known CVE');
+  });
+
+  it('says all-clear when changed deps are clean', () => {
+    const clean: ManifestReport = {
+      path: 'package.json',
+      report: report([finding('ok', 'safe')]),
+      changes: new Map([['ok', 'added']] as const),
+    };
+    expect(renderComment([clean])).toContain('No new CVEs introduced');
+  });
+
+  it('handles a PR that changed a manifest but no deps', () => {
+    const noChanges: ManifestReport = {
+      path: 'package.json',
+      report: report([finding('ok', 'safe')]),
+      changes: new Map(),
+    };
+    expect(renderComment([noChanges])).toContain('No added or bumped dependencies');
+  });
+});

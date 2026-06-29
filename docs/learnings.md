@@ -37,3 +37,15 @@ file and reading it back breaks. Store `{ v: value }` and return `.v`.
 **Why it came up:** The disk cache wraps API calls that legitimately resolve to `undefined` (e.g. a
 package with no Scorecard); the envelope lets a "negative" result cache cleanly instead of re-fetching.
 **Takeaway:** Cache the *envelope*, not the raw value, whenever the value can be `undefined`/`null`.
+
+## A JS GitHub Action runs from committed code — bundle and commit `dist`
+GitHub runs a JS action straight from the files in the repo with **no `npm install`** step, so the
+entry (`runs.main`) must be a self-contained bundle that already inlines every dependency — and that
+bundle has to be **committed**. We bundle with tsup (`noExternal: [/.*/]`, CJS, `node20`) and add a
+`.gitignore` negation (`!packages/action/dist/`) so the one build artifact we *do* track isn't
+ignored by the blanket `dist/` rule.
+**Why it came up:** Stage 2's `packages/action`. The same `pull_request` workflow uses the local
+action (`uses: ./packages/action`), so it pre-flights its own PRs — which is also the end-to-end test.
+**Takeaway:** Action authoring ≠ normal publishing: commit a bundled `dist`, pin `runs.using` to a
+node version, and keep the action's logic split into a pure core (unit-testable) + a thin
+`@actions/*` glue layer.

@@ -1,0 +1,16 @@
+{
+  "name": "@preflight/action",
+  "version": "0.1.0",
+  "description": "Preflight GitHub Action: pre-flight a PR's dependency changes for CVEs, framework-lockstep, and auto-update safety.",
+  "private": true,
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@preflight/core": "*"
+  }
+}

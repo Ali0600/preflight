@@ -1,5 +1,5 @@
 export * from './types';
-export { parseManifest } from './manifest';
+export { parseManifest, parseManifestContent } from './manifest';
 export { fetchVulns } from './osv';
 export { fetchRegistry, fetchRegistryAll, type RegistryInfo } from './registry';
 export { fetchScorecard } from './depsdev';

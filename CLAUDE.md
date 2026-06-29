@@ -12,8 +12,8 @@ auto-bump this — use `npx expo install`."
 Stage 1 (CLI) is **complete**: manifest → OSV vulns (+ CVSS-derived severity) + lockstep → verdict
 → table, with a 24h disk cache, `--latest` (latest version + `stale` verdict), `--health` (deps.dev
 Scorecard), and a `tsup` build to a standalone `dist`. Stages 2 (GitHub Action) and 3 (web dashboard)
-are speced in `docs/` but not built. Full plan: [docs/roadmap.md](docs/roadmap.md),
-[docs/spec.md](docs/spec.md).
+are speced in `docs/`. **Stage 2 is now built** (the Action); Stage 3 (web) is not. Full plan:
+[docs/roadmap.md](docs/roadmap.md), [docs/spec.md](docs/spec.md).
 
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
@@ -27,7 +27,9 @@ are speced in `docs/` but not built. Full plan: [docs/roadmap.md](docs/roadmap.m
   - `verdict.ts` — combine → `safe | pinned | cve | stale` (`stale` needs `--latest` data)
   - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report`
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
-- `packages/action` — Stage 2 (not built yet)
+- `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
+  comment + fail on new CVE. `report.ts` is pure (testable); `index.ts` is octokit glue. Bundled
+  to a **committed** `dist/index.js` (tsup, CJS) because Actions run from source with no install.
 - `packages/web` — Stage 3, Next.js dashboard (not built; design in `docs/dashboard-mockup.html`)
 
 ## Commands
@@ -56,7 +58,8 @@ are speced in `docs/` but not built. Full plan: [docs/roadmap.md](docs/roadmap.m
   `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
-## Résumé framing
-"Built a supply-chain pre-flight tool (CLI + GitHub Action + dashboard) that scores dependency
-health and CVE exposure via the OSV and deps.dev APIs, flags framework-lockstep packages unsafe to
-auto-update, generates SBOMs, and gates pull requests."
+## Experience Gained
+Accomplishment-style phrasing for what's built lives in the README's **Experience Gained** section —
+keep it accurate (engine + CLI + GitHub Action are real; SBOM generation and the web dashboard are
+not built yet) and separate from Features/Highlights. Don't add a "Résumé"-labelled section to
+committed docs.

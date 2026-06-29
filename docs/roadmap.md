@@ -18,12 +18,17 @@ analyze), CLI `preflight check` with a verdict table + `--json`, vitest for lock
 
 Acceptance: `node packages/cli/dist/index.js check <manifest>` runs standalone ✓; CI green ✓.
 
-## Stage 2 — GitHub Action (`packages/action`)
-- `action.yml` + `@actions/core` / `@actions/github`; on PRs touching a manifest, diff the deps and
-  comment the verdicts ("adding X: 1 CVE, +N transitive, Expo-pinned → bump via expo install").
-- Fail the check on a *new* CVE; annotate the PR. Reuses `analyze()`.
+## Stage 2 — GitHub Action (`packages/action`) — **built**
+- [x] `action.yml` (node20) + `@actions/core` / `@actions/github`; on PRs touching a manifest, diff
+      base-vs-head declared deps, run `analyze()` on the head, and post one **sticky** comment with
+      the verdicts for the added/bumped deps.
+- [x] Fail the check on a *new* CVE (`fail-on-cve`, default true); reuses `analyze()` + the new
+      `parseManifestContent()` (base manifest read over the API).
+- [x] Bundled to a single committed `dist/index.js` (tsup); `.github/workflows/preflight.yml` runs
+      `./packages/action` on PRs (`pull-requests: write`) — so it pre-flights its own PRs.
 
-Acceptance: a test PR in this repo gets a Preflight comment.
+Acceptance: a test PR in this repo gets a Preflight comment ✓ (this PR comments on itself).
+_Not yet: transitive-dep counts ("+N transitive") and per-line PR annotations — future polish._
 
 ## Stage 3 — Web dashboard (`packages/web`, Next.js)
 - Paste a manifest (textarea) or connect a repo (GitHub OAuth) → `analyze()` via an API route →
