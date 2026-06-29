@@ -5,6 +5,7 @@ import {
   diffDeclared,
   newCveCount,
   renderComment,
+  shouldFail,
   MARKER,
   type ManifestReport,
 } from '../src/report';
@@ -23,7 +24,7 @@ function finding(name: string, verdict: Verdict, range = '^1.0.0'): Finding {
 }
 
 function report(findings: Finding[]): Report {
-  const summary = { safe: 0, pinned: 0, cve: 0, stale: 0 };
+  const summary: Report['summary'] = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
   for (const f of findings) summary[f.verdict] += 1;
   return { ecosystem: 'npm', path: 'package.json', total: findings.length, findings, summary };
 }
@@ -96,5 +97,42 @@ describe('renderComment', () => {
       changes: new Map(),
     };
     expect(renderComment([noChanges])).toContain('No added or bumped dependencies');
+  });
+});
+
+describe('shouldFail (fail-level)', () => {
+  const cveFinding = (name: string, vuln: Partial<Finding['vulns'][number]>): Finding => ({
+    name,
+    range: '^1',
+    version: '1.0.0',
+    dev: false,
+    vulns: [{ id: 'CVE-x', summary: 's', severity: 'high', cve: 'CVE-x', ...vuln }],
+    lockstep: { pinned: false },
+    verdict: 'cve',
+    reason: 'cve',
+  });
+  const result = (f: Finding): ManifestReport => ({
+    path: 'package.json',
+    report: report([f]),
+    changes: new Map([[f.name, 'added']] as const),
+  });
+
+  it("'cve' fails on any new CVE", () => {
+    expect(shouldFail([result(cveFinding('a', {}))], 'cve')).toBe(true);
+  });
+
+  it("'kev' fails only on a confirmed-exploited CVE", () => {
+    expect(shouldFail([result(cveFinding('a', { epss: 0.9 }))], 'kev')).toBe(false);
+    expect(shouldFail([result(cveFinding('a', { kev: true }))], 'kev')).toBe(true);
+  });
+
+  it("'epss:<x>' fails above the probability threshold (or on KEV)", () => {
+    expect(shouldFail([result(cveFinding('a', { epss: 0.2 }))], 'epss:0.5')).toBe(false);
+    expect(shouldFail([result(cveFinding('a', { epss: 0.8 }))], 'epss:0.5')).toBe(true);
+  });
+
+  it('malware always fails regardless of level', () => {
+    const mal = { ...cveFinding('a', { malicious: true }), verdict: 'malware' as const };
+    expect(shouldFail([result(mal)], 'kev')).toBe(true);
   });
 });

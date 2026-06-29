@@ -95,3 +95,33 @@ describe('decideVerdict — stale', () => {
     expect(r.verdict).toBe('cve');
   });
 });
+
+describe('decideVerdict — exploitability + malware', () => {
+  const base = { name: 'x', range: '^1', version: '1.0.0', dev: false, lockstep: { pinned: false as const } };
+
+  it('a malicious package outranks everything (even a lockstep pin)', () => {
+    const r = decideVerdict({
+      ...base,
+      vulns: [{ id: 'MAL-1', summary: 'm', severity: 'critical', malicious: true }],
+      lockstep: { pinned: true, framework: 'Expo', tool: 'npx expo install' },
+    });
+    expect(r.verdict).toBe('malware');
+  });
+
+  it('a KEV-listed CVE reason flags it as actively exploited', () => {
+    const r = decideVerdict({
+      ...base,
+      vulns: [{ id: 'CVE-1', summary: 'v', severity: 'high', cve: 'CVE-1', kev: true, epss: 0.5 }],
+    });
+    expect(r.verdict).toBe('cve');
+    expect(r.reason).toContain('actively exploited (KEV)');
+  });
+
+  it('a high-EPSS CVE reason names the probability (KEV takes priority when both)', () => {
+    const r = decideVerdict({
+      ...base,
+      vulns: [{ id: 'CVE-2', summary: 'v', severity: 'high', cve: 'CVE-2', epss: 0.87 }],
+    });
+    expect(r.reason).toContain('EPSS 0.87');
+  });
+});

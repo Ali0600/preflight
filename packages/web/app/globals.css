@@ -206,6 +206,11 @@ body {
   font-size: 13px;
   vertical-align: -2px;
 }
+.badge.malware {
+  background: var(--text-danger);
+  color: var(--surface-2);
+  font-weight: 500;
+}
 .badge.cve {
   background: var(--bg-danger);
   color: var(--text-danger);

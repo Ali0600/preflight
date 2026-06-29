@@ -21,14 +21,15 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
     each `Finding`/`Dependency` tagged `direct`) / requirements.txt. OSV scans the whole graph;
     `--latest`/`--health` apply to direct deps only.
-  - `osv.ts` — OSV.dev client (querybatch for presence, then vuln details)
+  - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
+  - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
   - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
   - `registry.ts` — latest version + last-publish date (npm registry / PyPI)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard (2-hop; wired behind `--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
-  - `verdict.ts` — combine → `safe | pinned | cve | stale` (`stale` needs `--latest` data)
-  - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report`
+  - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
 - `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
   comment + fail on new CVE. `report.ts` is pure (testable); `index.ts` is octokit glue. Bundled

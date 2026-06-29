@@ -4,14 +4,20 @@ import { setCacheEnabled } from '../src/cache';
 import { fetchVulns } from '../src/osv';
 import type { Dependency } from '../src/types';
 
-// OSV details by id: one GHSA-labelled record, one carrying only a CVSS vector.
+// OSV details by id: a GHSA record (w/ CVE alias), a CVSS-vector-only record, a malicious package.
 const VULNS: Record<string, unknown> = {
-  'GHSA-yaml': { id: 'GHSA-yaml', summary: 'yaml bug', database_specific: { severity: 'HIGH' } },
+  'GHSA-yaml': {
+    id: 'GHSA-yaml',
+    summary: 'yaml bug',
+    aliases: ['CVE-2099-0001'],
+    database_specific: { severity: 'HIGH' },
+  },
   'CVE-foo': {
     id: 'CVE-foo',
     summary: 'foo bug',
     severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
   },
+  'MAL-evil': { id: 'MAL-evil', summary: 'malicious package' },
 };
 
 beforeEach(() => {
@@ -24,6 +30,7 @@ beforeEach(() => {
         const results = queries.map((q) => {
           if (q.package.name === 'js-yaml') return { vulns: [{ id: 'GHSA-yaml' }] };
           if (q.package.name === 'foo') return { vulns: [{ id: 'CVE-foo' }] };
+          if (q.package.name === 'evil') return { vulns: [{ id: 'MAL-evil' }] };
           return {};
         });
         return new Response(JSON.stringify({ results }), { status: 200 });
@@ -45,6 +52,7 @@ describe('fetchVulns', () => {
   const deps: Dependency[] = [
     { name: 'js-yaml', range: '^4', version: '4.1.0', dev: false },
     { name: 'foo', range: '^1', version: '1.0.0', dev: false },
+    { name: 'evil', range: '1.0.0', version: '1.0.0', dev: false },
     { name: 'clean', range: '^2', version: '2.0.0', dev: false },
     { name: 'no-version', range: '^1', dev: false }, // unresolved → never queried
   ];
@@ -52,7 +60,13 @@ describe('fetchVulns', () => {
   it('maps GHSA labels and falls back to the CVSS vector (keyed by name@version)', async () => {
     const map = await fetchVulns(deps, 'npm');
     expect(map.get('js-yaml@4.1.0')?.[0].severity).toBe('high');
+    expect(map.get('js-yaml@4.1.0')?.[0].cve).toBe('CVE-2099-0001'); // captured from aliases
     expect(map.get('foo@1.0.0')?.[0].severity).toBe('critical'); // derived from the CVSS vector
+  });
+
+  it('classifies MAL- advisories as malicious + critical', async () => {
+    const map = await fetchVulns(deps, 'npm');
+    expect(map.get('evil@1.0.0')?.[0]).toMatchObject({ malicious: true, severity: 'critical' });
   });
 
   it('omits clean deps and never queries unresolved ones', async () => {

@@ -10,9 +10,13 @@ inputs:
     required: false
     default: ${{ github.token }}
   fail-on-cve:
-    description: 'Fail the check when the PR introduces a dependency with a known CVE.'
+    description: 'Master switch — set to "false" to never fail the check (comment only).'
     required: false
     default: 'true'
+  fail-level:
+    description: 'When to fail: "cve" (any new CVE), "kev" (confirmed-exploited only), or "epss:<0-1>" (exploit probability ≥ x). Malicious packages always fail.'
+    required: false
+    default: 'cve'
 runs:
   using: 'node20'
   main: 'dist/index.js'

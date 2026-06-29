@@ -4,19 +4,26 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 
 const BADGE: Record<Verdict, (s: string) => string> = {
+  malware: (s) => pc.bgRed(pc.white(pc.bold(` ${s} `))),
   cve: (s) => pc.bgRed(pc.white(` ${s} `)),
   pinned: (s) => pc.bgYellow(pc.black(` ${s} `)),
   safe: (s) => pc.bgGreen(pc.black(` ${s} `)),
   stale: (s) => pc.bgMagenta(pc.white(` ${s} `)),
 };
 
-const LABEL: Record<Verdict, string> = { cve: 'CVE', pinned: 'PINNED', safe: 'SAFE', stale: 'STALE' };
-const ORDER: Record<Verdict, number> = { cve: 0, pinned: 1, stale: 2, safe: 3 };
+const LABEL: Record<Verdict, string> = {
+  malware: 'MALWARE',
+  cve: 'CVE',
+  pinned: 'PINNED',
+  safe: 'SAFE',
+  stale: 'STALE',
+};
+const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
 
 const byVerdict = (a: Finding, b: Finding) => ORDER[a.verdict] - ORDER[b.verdict];
 
 function printFinding(f: Finding): void {
-  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(6));
+  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(7));
   const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
   console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}`);
   console.log(`          ${pc.dim(f.reason)}`);
@@ -35,9 +42,10 @@ function printReport(r: Report): void {
   const counts = transitive.length
     ? `${r.total} deps (${direct.length} direct · ${transitive.length} transitive)`
     : `${r.total} deps`;
+  const malware = r.summary.malware > 0 ? `${r.summary.malware} malware · ` : '';
   console.log(
     pc.dim(
-      `${counts} · ${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
+      `${counts} · ${malware}${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
   console.log();
@@ -84,8 +92,8 @@ program
       } else {
         printReport(report);
       }
-      // Non-zero exit when any dependency carries a CVE, so CI can gate on it.
-      if (report.summary.cve > 0) process.exitCode = 1;
+      // Non-zero exit when any dependency carries a CVE or is malicious, so CI can gate on it.
+      if (report.summary.cve > 0 || report.summary.malware > 0) process.exitCode = 1;
     },
   );
 

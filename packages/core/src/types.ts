@@ -5,7 +5,7 @@ export type Ecosystem = 'npm' | 'PyPI';
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
-export type Verdict = 'safe' | 'pinned' | 'cve' | 'stale';
+export type Verdict = 'malware' | 'cve' | 'pinned' | 'stale' | 'safe';
 
 export interface Dependency {
   name: string;
@@ -29,6 +29,16 @@ export interface Vuln {
   id: string;
   summary: string;
   severity: Severity;
+  /** The CVE alias (e.g. "CVE-2021-44228"), when the advisory has one — keys EPSS/KEV lookups. */
+  cve?: string;
+  /** Exploit-prediction probability 0–1 (FIRST EPSS), when known. */
+  epss?: number;
+  /** EPSS percentile 0–1. */
+  epssPercentile?: number;
+  /** In CISA's Known Exploited Vulnerabilities catalog (confirmed exploited in the wild). */
+  kev?: boolean;
+  /** A malicious-package advisory (OSV `MAL-…`), not a flaw in a legitimate package. */
+  malicious?: boolean;
 }
 
 export interface LockstepInfo {

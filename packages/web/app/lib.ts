@@ -14,13 +14,14 @@ export const SAMPLE_PACKAGE_JSON = `{
 }`;
 
 export const VERDICT_META: Record<Verdict, { label: string; icon: string }> = {
+  malware: { label: 'Malware', icon: 'ti-biohazard' },
   cve: { label: 'CVE', icon: 'ti-alert-triangle' },
   pinned: { label: 'Pinned', icon: 'ti-lock' },
   stale: { label: 'Stale', icon: 'ti-clock' },
   safe: { label: 'Safe', icon: 'ti-circle-check' },
 };
 
-const ORDER: Record<Verdict, number> = { cve: 0, pinned: 1, stale: 2, safe: 3 };
+const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
 
 /** Problems first: cve, then pinned, stale, safe. */
 export function sortFindings(findings: Finding[]): Finding[] {

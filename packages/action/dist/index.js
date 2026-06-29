@@ -24124,10 +24124,14 @@ async function fetchVulns(deps, ecosystem) {
         const r = await fetch(`${OSV}/v1/vulns/${id}`);
         if (!r.ok) return void 0;
         const v = await r.json();
+        const malicious = id.startsWith("MAL-");
+        const cve = id.startsWith("CVE-") ? id : (v.aliases ?? []).find((a) => a.startsWith("CVE-"));
         return {
           id,
           summary: v.summary ?? v.details?.slice(0, 120) ?? id,
-          severity: severityOf(v)
+          severity: malicious ? "critical" : severityOf(v),
+          cve,
+          malicious: malicious || void 0
         };
       });
       if (vuln) details.set(id, vuln);
@@ -24207,6 +24211,46 @@ async function fetchScorecard(name, version, ecosystem) {
   });
 }
 
+// ../core/src/epss.ts
+var EPSS = "https://api.first.org/data/v1/epss";
+async function fetchEpss(cveIds) {
+  const out = /* @__PURE__ */ new Map();
+  const ids = [...new Set(cveIds.filter((id) => id.startsWith("CVE-")))];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const rows = await cached(`epss:${chunk.join(",")}`, async () => {
+      try {
+        const r = await fetch(`${EPSS}?cve=${chunk.join(",")}`);
+        if (!r.ok) return [];
+        const j = await r.json();
+        return j.data ?? [];
+      } catch (err) {
+        warn(`EPSS lookup failed: ${err.message}`);
+        return [];
+      }
+    });
+    for (const d of rows) out.set(d.cve, { epss: Number(d.epss), percentile: Number(d.percentile) });
+  }
+  return out;
+}
+
+// ../core/src/kev.ts
+var KEV_FEED = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+async function fetchKev() {
+  const ids = await cached("kev:catalog", async () => {
+    try {
+      const r = await fetch(KEV_FEED);
+      if (!r.ok) return [];
+      const j = await r.json();
+      return (j.vulnerabilities ?? []).map((v) => v.cveID);
+    } catch (err) {
+      warn(`CISA KEV lookup failed: ${err.message}`);
+      return [];
+    }
+  });
+  return new Set(ids);
+}
+
 // ../core/src/lockstep.ts
 var FRAMEWORK_SETS = [
   {
@@ -24277,6 +24321,11 @@ var STALE_AGE_MS = 365 * 24 * 60 * 60 * 1e3;
 function worst(vulns) {
   return vulns.reduce((acc, v) => RANK[v.severity] > RANK[acc] ? v.severity : acc, "unknown");
 }
+function exploitTail(vulns) {
+  if (vulns.some((v) => v.kev)) return " \xB7 actively exploited (KEV)";
+  const maxEpss = Math.max(0, ...vulns.map((v) => v.epss ?? 0));
+  return maxEpss >= 0.1 ? ` \xB7 EPSS ${maxEpss.toFixed(2)}` : "";
+}
 function majorOf(spec) {
   const m = spec?.match(/\d+/);
   return m ? Number(m[0]) : void 0;
@@ -24293,9 +24342,18 @@ function isStale(f) {
   return Number.isFinite(published) && Date.now() - published > STALE_AGE_MS;
 }
 function decideVerdict(f) {
+  if (f.vulns.some((v) => v.malicious)) {
+    return {
+      verdict: "malware",
+      reason: "Known-malicious package (OSV MAL advisory) \u2014 remove immediately"
+    };
+  }
   if (f.vulns.length > 0) {
     const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
-    return { verdict: "cve", reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${tail}` };
+    return {
+      verdict: "cve",
+      reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`
+    };
   }
   if (f.lockstep.pinned) {
     return {
@@ -24327,6 +24385,7 @@ async function analyzeManifest(manifest, opts = {}) {
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
     opts.health ? fetchHealth(directDeps, ecosystem) : void 0
   ]);
+  await enrichExploitability(vulnMap);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
     const base = {
@@ -24344,9 +24403,24 @@ async function analyzeManifest(manifest, opts = {}) {
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
   });
-  const summary = { safe: 0, pinned: 0, cve: 0, stale: 0 };
+  const summary = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
   for (const f of findings) summary[f.verdict] += 1;
   return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
+}
+async function enrichExploitability(vulnMap) {
+  const vulns = [...new Set([...vulnMap.values()].flat())];
+  const cves = vulns.map((v) => v.cve).filter((c) => Boolean(c));
+  if (cves.length === 0) return;
+  const [epss, kev] = await Promise.all([fetchEpss(cves), fetchKev()]);
+  for (const v of vulns) {
+    if (!v.cve) continue;
+    const e = epss.get(v.cve);
+    if (e) {
+      v.epss = e.epss;
+      v.epssPercentile = e.percentile;
+    }
+    if (kev.has(v.cve)) v.kev = true;
+  }
 }
 async function fetchHealth(deps, ecosystem) {
   const out = /* @__PURE__ */ new Map();
@@ -24361,8 +24435,21 @@ async function fetchHealth(deps, ecosystem) {
 
 // src/report.ts
 var MARKER = "<!-- preflight-action -->";
-var EMOJI = { cve: "\u{1F7E5}", pinned: "\u{1F7E8}", stale: "\u{1F7EA}", safe: "\u{1F7E9}" };
-var LABEL = { cve: "CVE", pinned: "PINNED", stale: "STALE", safe: "SAFE" };
+var EMOJI = {
+  malware: "\u2623\uFE0F",
+  cve: "\u{1F7E5}",
+  pinned: "\u{1F7E8}",
+  stale: "\u{1F7EA}",
+  safe: "\u{1F7E9}"
+};
+var LABEL = {
+  malware: "MALWARE",
+  cve: "CVE",
+  pinned: "PINNED",
+  stale: "STALE",
+  safe: "SAFE"
+};
+var ORDER = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
 function diffDeclared(base, head) {
   const baseRange = new Map(base.map((d) => [d.name, d.range]));
   const changes = /* @__PURE__ */ new Map();
@@ -24382,8 +24469,25 @@ function newCveCount(results) {
   return n;
 }
 function changedFindings({ report, changes }) {
-  const order = { cve: 0, pinned: 1, stale: 2, safe: 3 };
-  return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => order[a.verdict] - order[b.verdict]);
+  return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+}
+function shouldFail(results, level) {
+  for (const { report, changes } of results) {
+    for (const f of report.findings) {
+      if (f.direct === false || !changes.has(f.name)) continue;
+      if (f.verdict === "malware") return true;
+      if (f.verdict !== "cve") continue;
+      if (level === "kev") {
+        if (f.vulns.some((v) => v.kev)) return true;
+      } else if (level.startsWith("epss:")) {
+        const t = Number(level.slice(5)) || 0;
+        if (f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t)) return true;
+      } else {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 function transitiveCves(results) {
   return results.flatMap(
@@ -24432,6 +24536,7 @@ var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 async function run() {
   const token = core.getInput("github-token");
   const failOnCve = core.getInput("fail-on-cve") !== "false";
+  const failLevel = core.getInput("fail-level") || "cve";
   const pr = github.context.payload.pull_request;
   if (!pr) {
     core.info("Not a pull_request event \u2014 nothing to pre-flight.");
@@ -24470,11 +24575,10 @@ async function run() {
     return;
   }
   await upsertComment(octokit, owner, repo, issue_number, renderComment(results));
-  const newCves = newCveCount(results);
-  core.setOutput("new-cves", newCves);
-  if (failOnCve && newCves > 0) {
+  core.setOutput("new-cves", newCveCount(results));
+  if (failOnCve && shouldFail(results, failLevel)) {
     core.setFailed(
-      `Preflight: this PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE.`
+      `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`
     );
   }
 }

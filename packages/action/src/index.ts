@@ -2,7 +2,14 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import { analyze, parseManifestContent, type Dependency } from '@preflight/core';
 
-import { diffDeclared, newCveCount, renderComment, MARKER, type ManifestReport } from './report';
+import {
+  diffDeclared,
+  newCveCount,
+  renderComment,
+  shouldFail,
+  MARKER,
+  type ManifestReport,
+} from './report';
 
 // package.json or requirements*.txt, anywhere in the tree.
 const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
@@ -10,6 +17,7 @@ const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 async function run(): Promise<void> {
   const token = core.getInput('github-token');
   const failOnCve = core.getInput('fail-on-cve') !== 'false';
+  const failLevel = core.getInput('fail-level') || 'cve';
 
   const pr = github.context.payload.pull_request;
   if (!pr) {
@@ -55,11 +63,10 @@ async function run(): Promise<void> {
 
   await upsertComment(octokit, owner, repo, issue_number, renderComment(results));
 
-  const newCves = newCveCount(results);
-  core.setOutput('new-cves', newCves);
-  if (failOnCve && newCves > 0) {
+  core.setOutput('new-cves', newCveCount(results));
+  if (failOnCve && shouldFail(results, failLevel)) {
     core.setFailed(
-      `Preflight: this PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE.`,
+      `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`,
     );
   }
 }
