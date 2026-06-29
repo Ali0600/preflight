@@ -32,9 +32,12 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
-- `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
-  comment + fail on new CVE. `report.ts` is pure (testable); `index.ts` is octokit glue. Bundled
-  to a **committed** `dist/index.js` (tsup, CJS) because Actions run from source with no install.
+- `packages/action` (`@preflight/action`) — JS Action. `mode: pr` (default) diffs a PR → sticky
+  comment + `fail-level` gate (cve|kev|epss:x); `mode: repo` (scheduled) scans every committed
+  manifest → tracking issue. Writes `preflight.sarif` (uploaded to the Security tab). `report.ts`
+  pure/testable; `index.ts` octokit glue. **Committed** `dist/index.js` (tsup, CJS — Actions run
+  from source). Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml`
+  (tag → `npm publish @preflight/cli --provenance`).
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` route (Node runtime, `setCacheEnabled(false)`) → `analyzeContent()` → metric cards +
   findings, matching `docs/dashboard-mockup.html`. Engine pulled in via `transpilePackages`; excluded

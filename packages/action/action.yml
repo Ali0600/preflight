@@ -17,6 +17,10 @@ inputs:
     description: 'When to fail: "cve" (any new CVE), "kev" (confirmed-exploited only), or "epss:<0-1>" (exploit probability ≥ x). Malicious packages always fail.'
     required: false
     default: 'cve'
+  mode:
+    description: '"pr" (default) diffs the PR and comments; "repo" scans every committed manifest and opens/updates a tracking issue (for scheduled runs).'
+    required: false
+    default: 'pr'
 runs:
   using: 'node20'
   main: 'dist/index.js'

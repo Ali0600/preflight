@@ -23937,6 +23937,7 @@ var require_github = __commonJS({
 
 // src/index.ts
 var import_node_fs3 = require("fs");
+var import_node_path3 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
 
@@ -24494,6 +24495,7 @@ async function fetchHealth(deps, ecosystem) {
 
 // src/report.ts
 var MARKER = "<!-- preflight-action -->";
+var ISSUE_MARKER = "<!-- preflight-scheduled -->";
 var EMOJI = {
   malware: "\u2623\uFE0F",
   cve: "\u{1F7E5}",
@@ -24553,6 +24555,26 @@ function transitiveCves(results) {
     (r) => r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0)
   );
 }
+function renderRepoIssue(reports) {
+  const risky = (r) => r.findings.filter((f) => f.verdict === "malware" || f.verdict === "cve");
+  const lines = [ISSUE_MARKER, "## \u2708\uFE0F Preflight \u2014 scheduled dependency scan", ""];
+  let count = 0;
+  for (const r of reports) {
+    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    if (findings.length === 0) continue;
+    count += findings.length;
+    lines.push(`### \`${r.path}\` \u2014 ${findings.length}`, "");
+    lines.push("| Verdict | Package | Note |", "| --- | --- | --- |");
+    for (const f of findings) {
+      const tag = f.direct === false ? " _(transitive)_" : "";
+      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\`${tag} | ${f.reason} |`);
+    }
+    lines.push("");
+  }
+  if (count === 0) lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+  lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
+  return { body: lines.join("\n"), count };
+}
 function renderComment(results) {
   const withChanges = results.filter((r) => r.changes.size > 0);
   const lines = [MARKER, "## \u2708\uFE0F Preflight \u2014 dependency check", ""];
@@ -24593,16 +24615,22 @@ function renderComment(results) {
 // src/index.ts
 var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 async function run() {
-  const token = core.getInput("github-token");
+  const octokit = github.getOctokit(core.getInput("github-token"));
+  const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput("fail-on-cve") !== "false";
   const failLevel = core.getInput("fail-level") || "cve";
+  if ((core.getInput("mode") || "pr") === "repo") {
+    await runRepoScan(octokit, owner, repo, failOnCve);
+  } else {
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel);
+  }
+}
+async function runPrScan(octokit, owner, repo, failOnCve, failLevel) {
   const pr = github.context.payload.pull_request;
   if (!pr) {
     core.info("Not a pull_request event \u2014 nothing to pre-flight.");
     return;
   }
-  const octokit = github.getOctokit(token);
-  const { owner, repo } = github.context.repo;
   const issue_number = pr.number;
   const baseSha = pr.base?.sha;
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -24622,15 +24650,13 @@ async function run() {
     try {
       const report = await analyze(path);
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      const directHead = report.findings.filter((f2) => f2.direct !== false);
-      const changes = diffDeclared(baseDeps, directHead);
+      const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
       if (changes.size > 0) results.push({ path, report, changes });
     } catch (err) {
       core.warning(`Skipped ${path}: ${err.message}`);
     }
   }
-  (0, import_node_fs3.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(results.map((r) => r.report))));
-  core.setOutput("sarif-file", "preflight.sarif");
+  writeSarif(results.map((r) => r.report));
   if (results.length === 0) {
     core.info("No added or bumped dependencies to report.");
     return;
@@ -24642,6 +24668,45 @@ async function run() {
       `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`
     );
   }
+}
+async function runRepoScan(octokit, owner, repo, failOnCve) {
+  const paths = findManifests(".");
+  core.info(`Scanning ${paths.length} manifest(s).`);
+  const reports = [];
+  for (const path of paths) {
+    try {
+      reports.push(await analyze(path));
+    } catch (err) {
+      core.warning(`Skipped ${path}: ${err.message}`);
+    }
+  }
+  writeSarif(reports);
+  const { body, count } = renderRepoIssue(reports);
+  await upsertIssue(octokit, owner, repo, body, count > 0);
+  core.setOutput("vuln-count", count);
+  if (failOnCve && count > 0) {
+    core.setFailed(`Preflight: ${count} known vulnerability finding(s) across the repo's manifests.`);
+  }
+}
+function writeSarif(reports) {
+  (0, import_node_fs3.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
+  core.setOutput("sarif-file", "preflight.sarif");
+}
+function findManifests(root) {
+  const skip = /* @__PURE__ */ new Set(["node_modules", "dist", "coverage"]);
+  const out = [];
+  const walk = (dir) => {
+    for (const e of (0, import_node_fs3.readdirSync)(dir, { withFileTypes: true })) {
+      const p = (0, import_node_path3.join)(dir, e.name);
+      if (e.isDirectory()) {
+        if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);
+      } else if (MANIFEST.test(e.name)) {
+        out.push(p);
+      }
+    }
+  };
+  walk(root);
+  return out;
 }
 async function fetchBaseDeps(octokit, owner, repo, path, ref) {
   if (!ref) return [];
@@ -24669,6 +24734,25 @@ async function upsertComment(octokit, owner, repo, issue_number, body) {
     await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
   } else {
     await octokit.rest.issues.createComment({ owner, repo, issue_number, body });
+  }
+}
+async function upsertIssue(octokit, owner, repo, body, createIfMissing) {
+  const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
+    owner,
+    repo,
+    state: "open",
+    per_page: 100
+  });
+  const existing = issues.find((i) => !i.pull_request && i.body?.includes(ISSUE_MARKER));
+  if (existing) {
+    await octokit.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+  } else if (createIfMissing) {
+    await octokit.rest.issues.create({
+      owner,
+      repo,
+      title: "Preflight: dependency vulnerability report",
+      body
+    });
   }
 }
 run().catch((err) => core.setFailed(err.message));

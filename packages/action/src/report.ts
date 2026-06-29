@@ -12,6 +12,8 @@ interface Declared {
 
 /** Marker so we can find & update our own sticky comment instead of posting a new one each push. */
 export const MARKER = '<!-- preflight-action -->';
+/** Marker on the scheduled-scan tracking issue. */
+export const ISSUE_MARKER = '<!-- preflight-scheduled -->';
 
 const EMOJI: Record<Verdict, string> = {
   malware: '☣️',
@@ -91,6 +93,31 @@ function transitiveCves(results: ManifestReport[]) {
   return results.flatMap((r) =>
     r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0),
   );
+}
+
+/** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests. */
+export function renderRepoIssue(reports: Report[]): { body: string; count: number } {
+  const risky = (r: Report) =>
+    r.findings.filter((f) => f.verdict === 'malware' || f.verdict === 'cve');
+  const lines = [ISSUE_MARKER, '## ✈️ Preflight — scheduled dependency scan', ''];
+  let count = 0;
+
+  for (const r of reports) {
+    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    if (findings.length === 0) continue;
+    count += findings.length;
+    lines.push(`### \`${r.path}\` — ${findings.length}`, '');
+    lines.push('| Verdict | Package | Note |', '| --- | --- | --- |');
+    for (const f of findings) {
+      const tag = f.direct === false ? ' _(transitive)_' : '';
+      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\`${tag} | ${f.reason} |`);
+    }
+    lines.push('');
+  }
+
+  if (count === 0) lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+  lines.push(`_Last scanned ${new Date().toISOString().slice(0, 10)}._`);
+  return { body: lines.join('\n'), count };
 }
 
 /** Render the full sticky PR comment (Markdown). Returns just the body. */

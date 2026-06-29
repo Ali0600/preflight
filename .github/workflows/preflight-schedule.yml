@@ -1,0 +1,29 @@
+name: Preflight (scheduled)
+
+# Catch CVEs disclosed *after* a dependency was merged: re-scan every committed manifest
+# weekly and open/update a tracking issue with anything newly vulnerable.
+on:
+  schedule:
+    - cron: '0 7 * * 1' # Mondays 07:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+jobs:
+  scan:
+    name: Scan committed manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./packages/action
+        with:
+          mode: repo
+      - name: Upload findings to the Security tab
+        if: always() && hashFiles('preflight.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: preflight.sarif

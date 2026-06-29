@@ -5,7 +5,9 @@ import {
   diffDeclared,
   newCveCount,
   renderComment,
+  renderRepoIssue,
   shouldFail,
+  ISSUE_MARKER,
   MARKER,
   type ManifestReport,
 } from '../src/report';
@@ -97,6 +99,28 @@ describe('renderComment', () => {
       changes: new Map(),
     };
     expect(renderComment([noChanges])).toContain('No added or bumped dependencies');
+  });
+});
+
+describe('renderRepoIssue (scheduled scan)', () => {
+  it('lists only cve/malware findings, tags transitive, and counts them', () => {
+    const r = report([
+      finding('direct-cve', 'cve'),
+      { ...finding('deep-cve', 'cve'), direct: false },
+      finding('fine', 'safe'),
+    ]);
+    const { body, count } = renderRepoIssue([r]);
+    expect(count).toBe(2);
+    expect(body).toContain(ISSUE_MARKER);
+    expect(body).toContain('direct-cve');
+    expect(body).toContain('_(transitive)_'); // deep-cve flagged transitive
+    expect(body).not.toContain('| 🟩 SAFE |'); // safe deps omitted
+  });
+
+  it('reports all-clear when nothing is vulnerable', () => {
+    const { body, count } = renderRepoIssue([report([finding('fine', 'safe')])]);
+    expect(count).toBe(0);
+    expect(body).toContain('No known vulnerabilities');
   });
 });
 

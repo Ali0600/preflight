@@ -82,6 +82,10 @@ OSV.dev · deps.dev (v3) · npm registry · PyPI JSON · endoflife.date
 - Modeled framework **lockstep** version sets (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix,
   Astro) to produce upgrade guidance generic auto-updaters can't, and verified every external API
   shape against live docs before coding.
+- Deepened it into a real supply-chain scanner: **whole-lockfile transitive** scanning, **risk-based
+  prioritization** (EPSS exploit-probability + CISA KEV) over CVSS, **malicious-package** detection,
+  **CycloneDX SBOM** + **SARIF** (GitHub Security tab) export, and a **scheduled cron re-scan** that
+  files an issue when a dependency becomes newly vulnerable — all keyless.
 
 ## License
 MIT (intended).
