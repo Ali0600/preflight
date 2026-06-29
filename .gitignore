@@ -8,3 +8,6 @@ coverage/
 .DS_Store
 .env
 .preflight-cache/
+# Next.js (packages/web)
+.next/
+next-env.d.ts

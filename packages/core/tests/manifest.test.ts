@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseManifest } from '../src/manifest';
+import { parseManifest, parseManifestContent } from '../src/manifest';
 
 const fixture = (p: string) => fileURLToPath(new URL(`./fixtures/${p}`, import.meta.url));
 
@@ -43,5 +43,26 @@ describe('parseManifest — pip', () => {
 describe('parseManifest — unsupported', () => {
   it('throws on an unknown manifest', () => {
     expect(() => parseManifest('/tmp/Gemfile')).toThrow(/Unsupported manifest/);
+  });
+});
+
+describe('parseManifestContent — npm exact-pin inference (no lockfile)', () => {
+  // The dashboard pastes a manifest with no lockfile, so an exact pin is the resolved version;
+  // a range stays unresolved (won't be CVE-queried).
+  const m = parseManifestContent(
+    'package.json',
+    JSON.stringify({
+      dependencies: { 'react-native': '0.85.3', expo: '~56.0.12', lodash: '^4.17.0' },
+    }),
+  );
+  const ver = (name: string) => m.dependencies.find((d) => d.name === name)?.version;
+
+  it('treats an exact semver as the version', () => {
+    expect(ver('react-native')).toBe('0.85.3');
+  });
+
+  it('leaves ranged specs (^ / ~) unresolved', () => {
+    expect(ver('expo')).toBeUndefined();
+    expect(ver('lodash')).toBeUndefined();
   });
 });

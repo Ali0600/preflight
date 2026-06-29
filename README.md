@@ -30,8 +30,9 @@ per-package updater break your build.
 2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the changed manifests and posts a
    sticky comment with the verdicts for added/bumped deps; fails the check on a newly-introduced
    CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
-3. **Web dashboard** (`@preflight/web`, Next.js) — paste a manifest or connect a repo → the
-   dashboard in [docs/dashboard-mockup.html](docs/dashboard-mockup.html). Deploy on Vercel.
+3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest → metric cards +
+   findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html), dark-mode aware.
+   **Working today** (`npm run dev -w @preflight/web`); GitHub-repo OAuth is deferred, Vercel-ready.
 
 ## Quickstart
 ```bash
@@ -40,6 +41,7 @@ npm run check -- path/to/package.json      # or a requirements*.txt
 npm run check -- examples/requirements.txt --latest   # add latest-version + staleness
 npm test                                    # vitest
 npm run build                               # tsup → standalone dist (publishable CLI)
+npm run dev -w @preflight/web               # the dashboard at http://localhost:3000
 ```
 
 Example (an Expo app — everything Expo-pinned, nothing to auto-bump):
@@ -74,6 +76,9 @@ OSV.dev · deps.dev (v3) · npm registry · PyPI JSON · endoflife.date
 - Built a **CI/CD security gate** as a GitHub Action (`@actions/*` toolkit + Octokit) that diffs
   dependency changes on each pull request, posts an automated review comment, and fails the check on
   a newly-introduced CVE — self-tested by running on its own PRs.
+- Shipped a **Next.js (App Router, React 19) dashboard** that analyzes a pasted manifest through a
+  Node route handler and renders a dark-mode-aware metric/findings view — one engine reused across a
+  CLI, a CI action, and a web app via a TypeScript workspace (`transpilePackages`).
 - Modeled framework **lockstep** version sets (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix,
   Astro) to produce upgrade guidance generic auto-updaters can't, and verified every external API
   shape against live docs before coding.

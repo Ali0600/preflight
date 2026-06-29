@@ -23959,11 +23959,15 @@ function parseManifest(path) {
   if (manifest.ecosystem === "npm") resolveNpmLockVersions(path, manifest.dependencies);
   return manifest;
 }
+function exactPin(range) {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(range.trim()) ? range.trim() : void 0;
+}
 function parseNpm(content) {
   const pkg = JSON.parse(content);
   const deps = [];
   const add = (obj, dev) => {
-    for (const [name, range] of Object.entries(obj ?? {})) deps.push({ name, range, dev });
+    for (const [name, range] of Object.entries(obj ?? {}))
+      deps.push({ name, range, dev, version: exactPin(range) });
   };
   add(pkg.dependencies, false);
   add(pkg.devDependencies, true);
@@ -24299,7 +24303,9 @@ function decideVerdict(f) {
 
 // ../core/src/analyze.ts
 async function analyze(path, opts = {}) {
-  const manifest = parseManifest(path);
+  return analyzeManifest(parseManifest(path), opts);
+}
+async function analyzeManifest(manifest, opts = {}) {
   const { dependencies, ecosystem } = manifest;
   const [vulnMap, registryMap, healthMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
@@ -24324,7 +24330,7 @@ async function analyze(path, opts = {}) {
   });
   const summary = { safe: 0, pinned: 0, cve: 0, stale: 0 };
   for (const f of findings) summary[f.verdict] += 1;
-  return { ecosystem, path, total: findings.length, findings, summary };
+  return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
 }
 async function fetchHealth(deps, ecosystem) {
   const out = /* @__PURE__ */ new Map();

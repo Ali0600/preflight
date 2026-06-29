@@ -12,8 +12,9 @@ auto-bump this — use `npx expo install`."
 Stage 1 (CLI) is **complete**: manifest → OSV vulns (+ CVSS-derived severity) + lockstep → verdict
 → table, with a 24h disk cache, `--latest` (latest version + `stale` verdict), `--health` (deps.dev
 Scorecard), and a `tsup` build to a standalone `dist`. Stages 2 (GitHub Action) and 3 (web dashboard)
-are speced in `docs/`. **Stage 2 is now built** (the Action); Stage 3 (web) is not. Full plan:
-[docs/roadmap.md](docs/roadmap.md), [docs/spec.md](docs/spec.md).
+are speced in `docs/`. **Stages 2 (Action) and 3 (web dashboard) are now built**; the dashboard's
+repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs/roadmap.md),
+[docs/spec.md](docs/spec.md).
 
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
@@ -30,13 +31,17 @@ are speced in `docs/`. **Stage 2 is now built** (the Action); Stage 3 (web) is n
 - `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
   comment + fail on new CVE. `report.ts` is pure (testable); `index.ts` is octokit glue. Bundled
   to a **committed** `dist/index.js` (tsup, CJS) because Actions run from source with no install.
-- `packages/web` — Stage 3, Next.js dashboard (not built; design in `docs/dashboard-mockup.html`)
+- `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
+  `/api/analyze` route (Node runtime, `setCacheEnabled(false)`) → `analyzeContent()` → metric cards +
+  findings, matching `docs/dashboard-mockup.html`. Engine pulled in via `transpilePackages`; excluded
+  from root eslint/tsc (it self-checks via `next build`). Repo-OAuth connect is deferred.
 
 ## Commands
 - Install: `npm install`
 - Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--latest`, `--health`, `--no-cache`)
 - Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
-- Build: `npm run build` (tsup → `dist`; CLI is a standalone bundle, runs via `node packages/cli/dist/index.js`)
+- Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
+- Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)
 - Demo: `npm run check -- ~/grocery-helper/mobile/package.json` → 10 Expo-pinned, 7 safe, 0 CVE.
   `npm run check -- examples/requirements.txt --latest` → 4 CVE, 1 safe (exit 1).
 
