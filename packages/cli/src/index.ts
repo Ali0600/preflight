@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { analyze, setCacheEnabled, type Report, type Verdict } from '@preflight/core';
+import { analyze, setCacheEnabled, type Finding, type Report, type Verdict } from '@preflight/core';
 import { Command } from 'commander';
 import pc from 'picocolors';
 
@@ -13,24 +13,40 @@ const BADGE: Record<Verdict, (s: string) => string> = {
 const LABEL: Record<Verdict, string> = { cve: 'CVE', pinned: 'PINNED', safe: 'SAFE', stale: 'STALE' };
 const ORDER: Record<Verdict, number> = { cve: 0, pinned: 1, stale: 2, safe: 3 };
 
+const byVerdict = (a: Finding, b: Finding) => ORDER[a.verdict] - ORDER[b.verdict];
+
+function printFinding(f: Finding): void {
+  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(6));
+  const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
+  console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}`);
+  console.log(`          ${pc.dim(f.reason)}`);
+  if (f.health !== undefined) {
+    console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}`);
+  }
+}
+
 function printReport(r: Report): void {
+  const direct = r.findings.filter((f) => f.direct !== false);
+  const transitive = r.findings.filter((f) => f.direct === false);
+  const transitiveVulns = transitive.filter((f) => f.vulns.length > 0);
+
   console.log();
   console.log(pc.bold(`Preflight — ${r.path}`));
+  const counts = transitive.length
+    ? `${r.total} deps (${direct.length} direct · ${transitive.length} transitive)`
+    : `${r.total} deps`;
   console.log(
     pc.dim(
-      `${r.total} deps · ${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
+      `${counts} · ${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
   console.log();
-  for (const f of [...r.findings].sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict])) {
-    const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(6));
-    const latest =
-      f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
-    console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}`);
-    console.log(`          ${pc.dim(f.reason)}`);
-    if (f.health !== undefined) {
-      console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}`);
-    }
+  for (const f of [...direct].sort(byVerdict)) printFinding(f);
+  // Transitive deps are too numerous to list in full; surface only the ones that carry a CVE.
+  if (transitiveVulns.length > 0) {
+    console.log();
+    console.log(pc.bold(`Transitive dependencies with CVEs (${transitiveVulns.length})`));
+    for (const f of [...transitiveVulns].sort(byVerdict)) printFinding(f);
   }
   console.log();
 }

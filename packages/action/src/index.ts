@@ -39,7 +39,9 @@ async function run(): Promise<void> {
     try {
       const report = await analyze(path); // head: reads the checked-out file (+ lockfile) and queries OSV
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      const changes = diffDeclared(baseDeps, report.findings);
+      // Diff only the declared (direct) deps — the report also contains the transitive graph.
+      const directHead = report.findings.filter((f) => f.direct !== false);
+      const changes = diffDeclared(baseDeps, directHead);
       if (changes.size > 0) results.push({ path, report, changes });
     } catch (err) {
       core.warning(`Skipped ${path}: ${(err as Error).message}`);

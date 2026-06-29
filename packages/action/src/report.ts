@@ -34,23 +34,30 @@ export function diffDeclared(base: Declared[], head: Declared[]): Map<string, Ch
   return changes;
 }
 
-/** Number of added/bumped deps that carry a CVE — i.e. CVEs this PR newly introduces. */
+/** Number of added/bumped direct deps that carry a CVE — i.e. CVEs this PR newly introduces. */
 export function newCveCount(results: ManifestReport[]): number {
   let n = 0;
   for (const { report, changes } of results) {
     for (const f of report.findings) {
-      if (changes.has(f.name) && f.verdict === 'cve') n += 1;
+      if (f.direct !== false && changes.has(f.name) && f.verdict === 'cve') n += 1;
     }
   }
   return n;
 }
 
-/** Findings for the deps this PR added/bumped, worst verdict first. */
+/** Findings for the direct deps this PR added/bumped, worst verdict first. */
 function changedFindings({ report, changes }: ManifestReport) {
   const order: Record<Verdict, number> = { cve: 0, pinned: 1, stale: 2, safe: 3 };
   return report.findings
-    .filter((f) => changes.has(f.name))
+    .filter((f) => f.direct !== false && changes.has(f.name))
     .sort((a, b) => order[a.verdict] - order[b.verdict]);
+}
+
+/** Transitive (indirect) deps anywhere in the scanned tree that carry a CVE. */
+function transitiveCves(results: ManifestReport[]) {
+  return results.flatMap((r) =>
+    r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0),
+  );
 }
 
 /** Render the full sticky PR comment (Markdown). Returns just the body. */
@@ -76,6 +83,15 @@ export function renderComment(results: ManifestReport[]): string {
       );
     }
     lines.push('');
+  }
+
+  const transitive = transitiveCves(results);
+  if (transitive.length > 0) {
+    const names = [...new Set(transitive.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+    lines.push(
+      `🔎 ${transitive.length} transitive ${transitive.length === 1 ? 'dependency' : 'dependencies'} in the tree carry known CVEs: ${names.join(', ')}${transitive.length > names.length ? ', …' : ''}`,
+      '',
+    );
   }
 
   const newCves = newCveCount(results);

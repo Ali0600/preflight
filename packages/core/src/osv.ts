@@ -38,20 +38,20 @@ function severityOf(v: OsvDetail): Severity {
 /**
  * Look up known vulnerabilities for the given (versioned) deps.
  * One `querybatch` POST for presence, then fetch details for the distinct vuln ids.
- * Returns a map of dependency name -> vulns (only deps with a resolved version are queried).
+ * Returns a map keyed by `name@version` — a package can appear at several versions across the
+ * dependency graph, so the name alone isn't unique. Deps without a resolved version are skipped.
  */
 export async function fetchVulns(
   deps: Dependency[],
   ecosystem: Ecosystem,
 ): Promise<Map<string, Vuln[]>> {
   const out = new Map<string, Vuln[]>();
-  const versioned = deps.filter((d): d is Dependency & { version: string } => Boolean(d.version));
-  if (versioned.length === 0) return out;
+  const items = new Map<string, { name: string; version: string }>();
+  for (const d of deps) if (d.version) items.set(`${d.name}@${d.version}`, { name: d.name, version: d.version });
+  const list = [...items.values()];
+  if (list.length === 0) return out;
 
-  const queries = versioned.map((d) => ({
-    package: { name: d.name, ecosystem },
-    version: d.version,
-  }));
+  const queries = list.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
   const results = await cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
     const res = await fetch(`${OSV}/v1/querybatch`, {
       method: 'POST',
@@ -63,11 +63,11 @@ export async function fetchVulns(
     return data.results ?? [];
   });
 
-  const idsByDep = versioned
-    .map((dep, i) => ({ dep, ids: (results[i]?.vulns ?? []).map((v) => v.id) }))
+  const idsByItem = list
+    .map((it, i) => ({ it, ids: (results[i]?.vulns ?? []).map((v) => v.id) }))
     .filter((x) => x.ids.length > 0);
 
-  const uniqueIds = [...new Set(idsByDep.flatMap((x) => x.ids))];
+  const uniqueIds = [...new Set(idsByItem.flatMap((x) => x.ids))];
   const details = new Map<string, Vuln>();
   await Promise.all(
     uniqueIds.map(async (id) => {
@@ -85,9 +85,9 @@ export async function fetchVulns(
     }),
   );
 
-  for (const { dep, ids } of idsByDep) {
+  for (const { it, ids } of idsByItem) {
     out.set(
-      dep.name,
+      `${it.name}@${it.version}`,
       ids.map((id) => details.get(id)).filter((v): v is Vuln => Boolean(v)),
     );
   }
