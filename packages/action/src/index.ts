@@ -1,6 +1,8 @@
+import { writeFileSync } from 'node:fs';
+
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { analyze, parseManifestContent, type Dependency } from '@preflight/core';
+import { analyze, parseManifestContent, toSarif, type Dependency } from '@preflight/core';
 
 import {
   diffDeclared,
@@ -55,6 +57,11 @@ async function run(): Promise<void> {
       core.warning(`Skipped ${path}: ${(err as Error).message}`);
     }
   }
+
+  // Emit SARIF for the whole scanned tree so findings land in the repo's Security tab
+  // (the workflow uploads it). Written even when no deps changed, so the upload step is simple.
+  writeFileSync('preflight.sarif', JSON.stringify(toSarif(results.map((r) => r.report))));
+  core.setOutput('sarif-file', 'preflight.sarif');
 
   if (results.length === 0) {
     core.info('No added or bumped dependencies to report.');

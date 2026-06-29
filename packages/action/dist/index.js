@@ -23936,6 +23936,7 @@ var require_github = __commonJS({
 });
 
 // src/index.ts
+var import_node_fs3 = require("fs");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
 
@@ -24372,6 +24373,64 @@ function decideVerdict(f) {
   return { verdict: "safe", reason: "Independent \u2014 safe to auto-update (CI-gated)" };
 }
 
+// ../core/src/sarif.ts
+var LEVEL = {
+  critical: "error",
+  high: "error",
+  medium: "warning",
+  low: "note",
+  unknown: "warning"
+};
+var SECURITY_SEVERITY = {
+  critical: "9.5",
+  high: "7.5",
+  medium: "5.0",
+  low: "2.0",
+  unknown: "0.0"
+};
+function toSarif(reports) {
+  const rules = /* @__PURE__ */ new Map();
+  const results = [];
+  for (const report of reports) {
+    for (const f of report.findings) {
+      for (const v of f.vulns) {
+        if (!rules.has(v.id)) {
+          rules.set(v.id, {
+            id: v.id,
+            name: v.malicious ? "MaliciousPackage" : "KnownVulnerability",
+            shortDescription: { text: v.summary.slice(0, 240) },
+            helpUri: `https://osv.dev/vulnerability/${v.id}`,
+            properties: { "security-severity": SECURITY_SEVERITY[v.severity] }
+          });
+        }
+        const exploited = v.kev ? " \u2014 actively exploited (CISA KEV)" : "";
+        results.push({
+          ruleId: v.id,
+          level: v.malicious ? "error" : LEVEL[v.severity],
+          message: { text: `${f.name}@${f.version ?? f.range}: ${v.summary}${exploited}` },
+          locations: [{ physicalLocation: { artifactLocation: { uri: report.path } } }]
+        });
+      }
+    }
+  }
+  return {
+    version: "2.1.0",
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "Preflight",
+            informationUri: "https://github.com/Ali0600/preflight",
+            rules: [...rules.values()]
+          }
+        },
+        results
+      }
+    ]
+  };
+}
+
 // ../core/src/analyze.ts
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
@@ -24570,6 +24629,8 @@ async function run() {
       core.warning(`Skipped ${path}: ${err.message}`);
     }
   }
+  (0, import_node_fs3.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(results.map((r) => r.report))));
+  core.setOutput("sarif-file", "preflight.sarif");
   if (results.length === 0) {
     core.info("No added or bumped dependencies to report.");
     return;

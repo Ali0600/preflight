@@ -29,6 +29,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `depsdev.ts` — deps.dev OpenSSF Scorecard (2-hop; wired behind `--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
 - `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
@@ -41,7 +42,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
 
 ## Commands
 - Install: `npm install`
-- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--latest`, `--health`, `--no-cache`)
+- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--sbom [file]`, `--latest`, `--health`, `--no-cache`)
 - Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
 - Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
 - Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)
