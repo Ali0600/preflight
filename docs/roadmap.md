@@ -30,9 +30,14 @@ Acceptance: `node packages/cli/dist/index.js check <manifest>` runs standalone �
 Acceptance: a test PR in this repo gets a Preflight comment ✓ (this PR comments on itself).
 _Not yet: transitive-dep counts ("+N transitive") and per-line PR annotations — future polish._
 
-## Stage 3 — Web dashboard (`packages/web`, Next.js)
-- Paste a manifest (textarea) or connect a repo (GitHub OAuth) → `analyze()` via an API route →
-  render the metric cards + findings list from `docs/dashboard-mockup.html` (match that design,
-  dark-mode aware). Deploy on Vercel.
+## Stage 3 — Web dashboard (`packages/web`, Next.js) — **built**
+- [x] Paste a manifest (textarea) → `analyzeContent()` via the `/api/analyze` route handler (Node
+      runtime, cache off) → metric cards + findings list + insight callout matching
+      `docs/dashboard-mockup.html`, dark-mode aware. App Router + React 19; engine pulled in via
+      `transpilePackages`.
+- [x] `--latest` always on (version transitions like `0.85.3 → 0.86.0`); an "Include OpenSSF health"
+      toggle drives the health-grade card. Exact-pinned npm deps are CVE-checked without a lockfile.
+- [ ] Connect a repo via GitHub OAuth (deferred config, per spec) — the paste flow is the MVP.
+- [ ] Deploy on Vercel (root directory `packages/web`; builds via the workspace) — ready, not yet pushed.
 
-Acceptance: paste grocery-helper/mobile's `package.json` → the mockup view, live.
+Acceptance: paste an Expo `package.json` → the mockup view, live ✓ (verified locally; screenshot in PR).

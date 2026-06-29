@@ -49,3 +49,15 @@ action (`uses: ./packages/action`), so it pre-flights its own PRs — which is a
 **Takeaway:** Action authoring ≠ normal publishing: commit a bundled `dist`, pin `runs.using` to a
 node version, and keep the action's logic split into a pure core (unit-testable) + a thin
 `@actions/*` glue layer.
+
+## Consuming a TS-source workspace package from Next.js → `transpilePackages`
+`@preflight/core` ships TypeScript source (its `exports` point at `./src`), so Next.js has to
+**transpile** it rather than expecting a prebuilt `dist`: `transpilePackages: ['@preflight/core']`
+in `next.config.ts`. The engine only loads server-side (the `/api/analyze` route handler, `runtime
+= 'nodejs'`); the client imports the package **type-only**, so `node:fs`/`node:crypto` never reach
+the browser bundle. The Next app also sits outside the root ESLint/`tsc` globs and self-checks via
+`next build`, avoiding JSX-parsing conflicts with the base config.
+**Why it came up:** Stage 3 reuses the same engine as the CLI and Action with zero duplication.
+**Takeaway:** In a TS monorepo, a framework that bundles (Next/Vite) can consume source packages
+directly with a transpile hint — no separate build/publish step — but keep runtime-only deps on the
+server and import them as types on the client.

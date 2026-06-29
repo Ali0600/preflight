@@ -31,6 +31,11 @@ export function parseManifest(path: string): Manifest {
   return manifest;
 }
 
+/** An exact semver pin (`1.2.3`, `0.85.3-rc.1`) — not a range like `^1` / `~1.2` / `>=1`. */
+function exactPin(range: string): string | undefined {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(range.trim()) ? range.trim() : undefined;
+}
+
 function parseNpm(content: string): Dependency[] {
   const pkg = JSON.parse(content) as {
     dependencies?: Record<string, string>;
@@ -38,7 +43,10 @@ function parseNpm(content: string): Dependency[] {
   };
   const deps: Dependency[] = [];
   const add = (obj: Record<string, string> | undefined, dev: boolean) => {
-    for (const [name, range] of Object.entries(obj ?? {})) deps.push({ name, range, dev });
+    // An exactly-pinned range *is* the resolved version (used when no lockfile is available,
+    // e.g. a manifest pasted into the dashboard); the lockfile overrides this when present.
+    for (const [name, range] of Object.entries(obj ?? {}))
+      deps.push({ name, range, dev, version: exactPin(range) });
   };
   add(pkg.dependencies, false);
   add(pkg.devDependencies, true);
