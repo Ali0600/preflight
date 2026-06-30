@@ -24394,7 +24394,7 @@ var POPULAR = {
   ]
 };
 function normalize(name) {
-  return name.replace(/^@[^/]+\//, "").replace(/[_.]/g, "-").toLowerCase();
+  return name.replace(/[_.]/g, "-").toLowerCase();
 }
 var NORM = {
   npm: new Set(POPULAR.npm.map(normalize)),

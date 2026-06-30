@@ -25,9 +25,11 @@ const POPULAR: Record<Ecosystem, string[]> = {
   ],
 };
 
-/** Strip scope and normalize separators so `cross_env`/`crossenv` compare against `cross-env`. */
+/** Normalize separators so `cross_env`/`cross.env` compare against `cross-env`. Scopes are kept:
+ * a scoped name (`@babel/core`) lives in its own namespace and can't typosquat an unscoped
+ * package (`cors`), so we must NOT strip `@scope/` and compare the bare `core`. */
 function normalize(name: string): string {
-  return name.replace(/^@[^/]+\//, '').replace(/[_.]/g, '-').toLowerCase();
+  return name.replace(/[_.]/g, '-').toLowerCase();
 }
 
 const NORM: Record<Ecosystem, Set<string>> = {
