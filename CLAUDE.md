@@ -24,9 +24,11 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
   - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
+  - `typosquat.ts` — offline lookalike heuristic (bundled top-packages list + Damerau-Levenshtein)
+  - `license.ts` — `licenseRisk()` buckets a license id → permissive/copyleft/unknown
   - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
-  - `registry.ts` — latest version + last-publish date (npm registry / PyPI)
-  - `depsdev.ts` — deps.dev OpenSSF Scorecard (2-hop; wired behind `--health`)
+  - `registry.ts` — latest version + last-publish date + **license** (npm registry / PyPI; under `--latest`)
+  - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)

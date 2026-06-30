@@ -23983,8 +23983,9 @@ function enumerateNpmGraph(path, declared) {
   const lj = JSON.parse((0, import_node_fs.readFileSync)(lock, "utf8"));
   const packages = lj.packages ?? {};
   for (const d of declared) {
-    const v = packages[`node_modules/${d.name}`]?.version;
-    if (v) d.version = v;
+    const entry = packages[`node_modules/${d.name}`];
+    if (entry?.version) d.version = entry.version;
+    if (entry?.hasInstallScript) d.installScript = true;
   }
   const seen = new Set(declared.filter((d) => d.version).map((d) => `${d.name}@${d.version}`));
   const transitive = [];
@@ -23995,7 +23996,14 @@ function enumerateNpmGraph(path, declared) {
     const id = `${name}@${entry.version}`;
     if (!name || seen.has(id)) continue;
     seen.add(id);
-    transitive.push({ name, range: "", version: entry.version, dev: false, direct: false });
+    transitive.push({
+      name,
+      range: "",
+      version: entry.version,
+      dev: false,
+      direct: false,
+      installScript: entry.hasInstallScript || void 0
+    });
   }
   return [...declared, ...transitive];
 }
@@ -24154,6 +24162,12 @@ function warn(message) {
 }
 
 // ../core/src/registry.ts
+function pypiLicense(info2) {
+  const cls = (info2?.classifiers ?? []).find((c) => c.startsWith("License ::"));
+  if (cls) return cls.split("::").pop()?.replace(/License$/i, "").trim() || cls;
+  const lic = info2?.license?.trim();
+  return lic && lic.length <= 40 ? lic : void 0;
+}
 async function fetchRegistry(name, ecosystem) {
   return cached(`registry:${ecosystem}:${name}`, async () => {
     try {
@@ -24161,14 +24175,15 @@ async function fetchRegistry(name, ecosystem) {
         const r2 = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`);
         if (!r2.ok) return {};
         const j2 = await r2.json();
-        return { latest: j2["dist-tags"]?.latest, lastPublish: j2.time?.modified };
+        const license = typeof j2.license === "string" ? j2.license : j2.license?.type;
+        return { latest: j2["dist-tags"]?.latest, lastPublish: j2.time?.modified, license };
       }
       const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
       if (!r.ok) return {};
       const j = await r.json();
       const latest = j.info?.version;
       const lastPublish = j.urls?.[0]?.upload_time_iso_8601 ?? (latest ? j.releases?.[latest]?.[0]?.upload_time_iso_8601 : void 0);
-      return { latest, lastPublish };
+      return { latest, lastPublish, license: pypiLicense(j.info) };
     } catch (err) {
       warn(`registry lookup failed for ${name}: ${err.message}`);
       return {};
@@ -24190,25 +24205,36 @@ var DEPSDEV = "https://api.deps.dev/v3";
 function system(ecosystem) {
   return ecosystem === "npm" ? "NPM" : "PYPI";
 }
-async function fetchScorecard(name, version, ecosystem) {
+var SECURITY_CHECKS = /* @__PURE__ */ new Set([
+  "Dangerous-Workflow",
+  "Token-Permissions",
+  "Branch-Protection",
+  "Code-Review",
+  "Pinned-Dependencies",
+  "Maintained",
+  "Signed-Releases",
+  "Vulnerabilities"
+]);
+async function fetchHealth(name, version, ecosystem) {
   return cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
     try {
       const sys = system(ecosystem);
       const verRes = await fetch(
         `${DEPSDEV}/systems/${sys}/packages/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
       );
-      if (!verRes.ok) return void 0;
+      if (!verRes.ok) return {};
       const ver = await verRes.json();
       const related = ver.relatedProjects ?? [];
       const projectId = (related.find((p) => p.relationType === "SOURCE_REPO") ?? related[0])?.projectKey?.id;
-      if (!projectId) return void 0;
+      if (!projectId) return {};
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (!projRes.ok) return void 0;
+      if (!projRes.ok) return {};
       const proj = await projRes.json();
-      return proj.scorecard?.overallScore;
+      const checks = (proj.scorecard?.checks ?? []).filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0).map((c) => ({ name: c.name, score: c.score }));
+      return { score: proj.scorecard?.overallScore, checks };
     } catch (err) {
       warn(`deps.dev lookup failed for ${name}@${version}: ${err.message}`);
-      return void 0;
+      return {};
     }
   });
 }
@@ -24251,6 +24277,154 @@ async function fetchKev() {
     }
   });
   return new Set(ids);
+}
+
+// ../core/src/typosquat.ts
+var POPULAR = {
+  npm: [
+    "lodash",
+    "react",
+    "react-dom",
+    "react-native",
+    "express",
+    "axios",
+    "chalk",
+    "commander",
+    "webpack",
+    "typescript",
+    "eslint",
+    "prettier",
+    "jest",
+    "mocha",
+    "vue",
+    "next",
+    "nuxt",
+    "svelte",
+    "vite",
+    "rollup",
+    "esbuild",
+    "dotenv",
+    "cross-env",
+    "rimraf",
+    "glob",
+    "uuid",
+    "moment",
+    "dayjs",
+    "classnames",
+    "redux",
+    "zustand",
+    "tailwindcss",
+    "postcss",
+    "autoprefixer",
+    "node-fetch",
+    "request",
+    "bluebird",
+    "underscore",
+    "ramda",
+    "socket.io",
+    "ws",
+    "mongoose",
+    "sequelize",
+    "pg",
+    "redis",
+    "jsonwebtoken",
+    "bcrypt",
+    "passport",
+    "cors",
+    "helmet",
+    "morgan",
+    "nodemon",
+    "husky",
+    "colors",
+    "color",
+    "debug",
+    "semver",
+    "yargs",
+    "inquirer",
+    "ora",
+    "execa",
+    "fs-extra",
+    "minimist",
+    "left-pad",
+    "picocolors",
+    "commander",
+    "concurrently"
+  ],
+  PyPI: [
+    "requests",
+    "urllib3",
+    "numpy",
+    "pandas",
+    "flask",
+    "django",
+    "fastapi",
+    "pytest",
+    "setuptools",
+    "wheel",
+    "scipy",
+    "matplotlib",
+    "pillow",
+    "boto3",
+    "click",
+    "jinja2",
+    "sqlalchemy",
+    "pydantic",
+    "aiohttp",
+    "beautifulsoup4",
+    "scikit-learn",
+    "tensorflow",
+    "torch",
+    "transformers",
+    "certifi",
+    "six",
+    "pyyaml",
+    "cryptography",
+    "python-dateutil",
+    "virtualenv",
+    "colorama",
+    "tqdm",
+    "rich",
+    "httpx",
+    "typer",
+    "poetry",
+    "selenium",
+    "openai",
+    "anyio",
+    "attrs"
+  ]
+};
+function normalize(name) {
+  return name.replace(/^@[^/]+\//, "").replace(/[_.]/g, "-").toLowerCase();
+}
+var NORM = {
+  npm: new Set(POPULAR.npm.map(normalize)),
+  PyPI: new Set(POPULAR.PyPI.map(normalize))
+};
+function isOneEditApart(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return dp[m][n] === 1;
+}
+function typosquatOf(name, ecosystem) {
+  const n = normalize(name);
+  if (n.length < 4 || NORM[ecosystem].has(n)) return void 0;
+  for (const p of POPULAR[ecosystem]) {
+    if (isOneEditApart(n, normalize(p))) return p;
+  }
+  return void 0;
 }
 
 // ../core/src/lockstep.ts
@@ -24443,22 +24617,30 @@ async function analyzeManifest(manifest, opts = {}) {
   const [vulnMap, registryMap, healthMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
-    opts.health ? fetchHealth(directDeps, ecosystem) : void 0
+    opts.health ? fetchHealthAll(directDeps, ecosystem) : void 0
   ]);
   await enrichExploitability(vulnMap);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
+    const health = healthMap?.get(d.name);
+    const direct = d.direct !== false;
     const base = {
       name: d.name,
       range: d.range,
       version: d.version,
       dev: d.dev,
-      direct: d.direct !== false,
+      direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
       lockstep: lockstepFor(d.name),
       latest: info2?.latest,
       lastPublish: info2?.lastPublish,
-      health: healthMap?.get(d.name)
+      license: info2?.license,
+      health: health?.score,
+      healthChecks: health?.checks?.filter((c) => c.score < 7),
+      // surface only the weak spots
+      installScript: d.installScript,
+      // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
+      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : void 0
     };
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
@@ -24482,15 +24664,19 @@ async function enrichExploitability(vulnMap) {
     if (kev.has(v.cve)) v.kev = true;
   }
 }
-async function fetchHealth(deps, ecosystem) {
+async function fetchHealthAll(deps, ecosystem) {
   const out = /* @__PURE__ */ new Map();
   await Promise.all(
     deps.filter((d) => d.version).map(async (d) => {
-      const score = await fetchScorecard(d.name, d.version, ecosystem);
-      if (score !== void 0) out.set(d.name, score);
+      const health = await fetchHealth(d.name, d.version, ecosystem);
+      if (health.score !== void 0 || health.checks?.length) out.set(d.name, health);
     })
   );
   return out;
+}
+function typosquatHit(name, ecosystem) {
+  const similarTo = typosquatOf(name, ecosystem);
+  return similarTo ? { similarTo } : void 0;
 }
 
 // src/report.ts
@@ -24590,8 +24776,14 @@ function renderComment(results) {
     lines.push("| Verdict | Package | Change | Note |", "| --- | --- | --- | --- |");
     for (const f of findings) {
       const ver = f.version ?? f.range;
+      const flags = [
+        f.installScript ? "\u2699 install script" : "",
+        f.suspiciousName ? `\u26A0 resembles \`${f.suspiciousName.similarTo}\`` : "",
+        f.license ? `\xB7 ${f.license}` : ""
+      ].filter(Boolean).join(" ");
+      const note = flags ? `${f.reason} ${flags}` : f.reason;
       lines.push(
-        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${f.reason} |`
+        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`
       );
     }
     lines.push("");

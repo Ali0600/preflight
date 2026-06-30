@@ -19,6 +19,9 @@ per-package updater break your build.
   auto-updaters (Dependabot/Renovate) can't see — with the exact upgrade command to use instead.
 - **Severity + health enrichment** — maps GHSA labels and computes CVSS v3 base scores for
   advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev.
+- **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
+  vector), names that look like **typosquats** of popular packages (fully offline), risky/unknown
+  **licenses**, and weak **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
 - **CI-gating** — exits non-zero on any CVE, so it drops straight into a pipeline.
 - **Three delivery surfaces, one engine** — a CLI (built to a standalone bundle with tsup), a
   GitHub Action that gates PRs, and a web dashboard, all reusing `@preflight/core`.
@@ -105,6 +108,9 @@ re-runs instant.
   prioritization** (EPSS exploit-probability + CISA KEV) over CVSS, **malicious-package** detection,
   **CycloneDX SBOM** + **SARIF** (GitHub Security tab) export, and a **scheduled cron re-scan** that
   files an issue when a dependency becomes newly vulnerable — all keyless.
+- Added proactive, pre-CVE supply-chain signals: **install-script** detection, an **offline typosquat
+  heuristic** (Damerau-Levenshtein vs a bundled popular-package list), **license-risk** bucketing, and
+  an **OpenSSF Scorecard** per-check breakdown — the risk a vulnerability feed can't tell you about.
 
 ## License
 MIT (intended).

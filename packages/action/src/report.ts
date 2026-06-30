@@ -138,8 +138,16 @@ export function renderComment(results: ManifestReport[]): string {
     lines.push('| Verdict | Package | Change | Note |', '| --- | --- | --- | --- |');
     for (const f of findings) {
       const ver = f.version ?? f.range;
+      const flags = [
+        f.installScript ? '⚙ install script' : '',
+        f.suspiciousName ? `⚠ resembles \`${f.suspiciousName.similarTo}\`` : '',
+        f.license ? `· ${f.license}` : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const note = flags ? `${f.reason} ${flags}` : f.reason;
       lines.push(
-        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${f.reason} |`,
+        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`,
       );
     }
     lines.push('');

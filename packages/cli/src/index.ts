@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 
 import {
   analyze,
+  licenseRisk,
   setCacheEnabled,
   toCycloneDX,
   type Finding,
@@ -31,13 +32,33 @@ const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3
 
 const byVerdict = (a: Finding, b: Finding) => ORDER[a.verdict] - ORDER[b.verdict];
 
+function licenseTag(f: Finding): string {
+  if (!f.license) return '';
+  const risk = licenseRisk(f.license);
+  const text = ` · ${f.license}`;
+  if (risk === 'copyleft') return pc.yellow(text);
+  if (risk === 'unknown') return pc.dim(`${text}?`);
+  return pc.dim(text);
+}
+
 function printFinding(f: Finding): void {
   const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(7));
   const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
-  console.log(`${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}`);
+  console.log(
+    `${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}${licenseTag(f)}`,
+  );
   console.log(`          ${pc.dim(f.reason)}`);
+  if (f.suspiciousName) {
+    console.log(`          ${pc.yellow(`⚠ name resembles "${f.suspiciousName.similarTo}" — confirm it's intended`)}`);
+  }
+  if (f.installScript) {
+    console.log(`          ${pc.yellow('⚙ runs an install script (code executes on npm install)')}`);
+  }
   if (f.health !== undefined) {
-    console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}`);
+    const weak = f.healthChecks?.length
+      ? pc.dim(` · weak: ${f.healthChecks.map((c) => c.name).join(', ')}`)
+      : '';
+    console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}${weak}`);
   }
 }
 
@@ -57,6 +78,15 @@ function printReport(r: Report): void {
       `${counts} · ${malware}${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
+  const scripts = r.findings.filter((f) => f.installScript).length;
+  const suspicious = r.findings.filter((f) => f.suspiciousName).length;
+  if (scripts > 0 || suspicious > 0) {
+    const bits = [
+      scripts > 0 ? `${scripts} run install scripts` : '',
+      suspicious > 0 ? pc.yellow(`${suspicious} suspicious name(s)`) : '',
+    ].filter(Boolean);
+    console.log(pc.dim(`supply-chain: ${bits.join(' · ')}`));
+  }
   console.log();
   for (const f of [...direct].sort(byVerdict)) printFinding(f);
   // Transitive deps are too numerous to list in full; surface only the ones that carry a CVE.

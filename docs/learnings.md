@@ -73,6 +73,20 @@ for free. Keyed vuln results by `name@version` since one package can appear at s
 **Takeaway:** For supply-chain scanning, the lockfile — not the manifest — is the source of truth for
 *what's actually installed*; the manifest only tells you what was *asked for*.
 
+## Reactive (CVE) vs proactive (attack-vector) detection — and proactive is often free
+A vulnerability feed (OSV/CVE) is *reactive*: it only flags what's already been reported, so a fresh
+malicious package or a risky-but-not-yet-CVE'd dep slips through. The *proactive* signals — does it
+run an `install` script, does its name look like a typosquat, what's its license, how healthy is the
+upstream project — catch a different, earlier class of risk, and most are **already in data you parse**:
+npm's lockfile carries `hasInstallScript`; typosquatting is pure offline string distance against a
+bundled popular-package list; license + Scorecard come from registry/deps.dev metadata you may already
+fetch.
+**Why it came up:** A crafted manifest with `lodahs`/`crossenv` got flagged as malware *and* as a
+typosquat — the heuristic catches the lookalike even when OSV hasn't (yet), and `hasInstallScript`
+surfaced esbuild/sharp/fsevents with zero extra calls.
+**Takeaway:** Don't stop at "known vulnerabilities." The cheapest, highest-signal supply-chain checks
+are the proactive ones, and they're usually a field in data you already have — not a new API.
+
 ## Severity ≠ risk: pair CVSS with EPSS (likelihood) and KEV (confirmed exploitation)
 CVSS scores how *bad* a vuln is if exploited; it's "top-heavy" (lots of 9s/10s) and says nothing about
 whether anyone is actually exploiting it. **EPSS** (FIRST, keyless batch API) gives a 0–1 *probability*

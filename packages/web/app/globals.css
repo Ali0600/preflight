@@ -196,6 +196,21 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
 }
+.row-warn {
+  font-size: 13px;
+  color: var(--text-warning);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.row-warn code {
+  font-family: ui-monospace, monospace;
+}
+.lic {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
 .badge {
   font-size: 12px;
   padding: 4px 10px;
