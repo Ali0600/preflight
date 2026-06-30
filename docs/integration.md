@@ -20,9 +20,32 @@ curl -X POST "$PREFLIGHT_URL/api/scan" -H 'content-type: application/json' \
 # → { total, summary:{cve,malware,…}, findings:[ {name,version,verdict,reason,…} ] }
 ```
 
-Run Preflight once (its `Dockerfile`/Vercel build) and point the dashboard at it via
-`PREFLIGHT_URL` (`http://localhost:3737` in dev, the deployed URL in prod). **Every Preflight
-improvement appears on its next redeploy — zero dashboard changes.**
+**Every Preflight improvement appears on its next redeploy — zero dashboard changes.**
+
+### Run Preflight as a service
+The web app builds to a self-contained server (Next standalone output). Run it however you deploy:
+
+```bash
+# Docker (from the repo root) — has a HEALTHCHECK on /api/health
+docker build -f packages/web/Dockerfile -t preflight-web .
+docker run -p 3000:3000 preflight-web
+
+# or locally without Docker
+npm run build -w @preflight/web && npx next start packages/web -p 3000
+
+# or Vercel: import the repo, Root Directory = packages/web
+```
+
+No env vars or keys are required (every data source is keyless). Then point the dashboard at it:
+
+```bash
+PREFLIGHT_URL=http://localhost:3000          # dev / same-host Docker
+# PREFLIGHT_URL=https://preflight.your-host  # deployed
+```
+
+Liveness: `GET $PREFLIGHT_URL/api/health` → `{ "ok": true }` (use it to show "Preflight unreachable"
+gracefully if it's down). For local dev, a `docker-compose.yml` in the dashboard that runs both
+services side by side is the tidiest setup.
 
 ### Dashboard side (Next.js App Router + better-sqlite3)
 A route that fetches a project's manifests from GitHub (your dashboard already has repo access),
