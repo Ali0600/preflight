@@ -18,7 +18,9 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
 
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
-  - `manifest.ts` — parse package.json (+ lockfile versions) / requirements.txt
+  - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
+    each `Finding`/`Dependency` tagged `direct`) / requirements.txt. OSV scans the whole graph;
+    `--latest`/`--health` apply to direct deps only.
   - `osv.ts` — OSV.dev client (querybatch for presence, then vuln details)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
   - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)

@@ -23956,7 +23956,9 @@ function parseManifestContent(filename, content) {
 function parseManifest(path) {
   ecosystemFor((0, import_node_path.basename)(path));
   const manifest = parseManifestContent(path, (0, import_node_fs.readFileSync)(path, "utf8"));
-  if (manifest.ecosystem === "npm") resolveNpmLockVersions(path, manifest.dependencies);
+  if (manifest.ecosystem === "npm") {
+    manifest.dependencies = enumerateNpmGraph(path, manifest.dependencies);
+  }
   return manifest;
 }
 function exactPin(range) {
@@ -23967,21 +23969,33 @@ function parseNpm(content) {
   const deps = [];
   const add = (obj, dev) => {
     for (const [name, range] of Object.entries(obj ?? {}))
-      deps.push({ name, range, dev, version: exactPin(range) });
+      deps.push({ name, range, dev, version: exactPin(range), direct: true });
   };
   add(pkg.dependencies, false);
   add(pkg.devDependencies, true);
   return deps;
 }
-function resolveNpmLockVersions(path, deps) {
+function enumerateNpmGraph(path, declared) {
   const lock = (0, import_node_path.join)((0, import_node_path.dirname)(path), "package-lock.json");
-  if (!(0, import_node_fs.existsSync)(lock)) return;
+  if (!(0, import_node_fs.existsSync)(lock)) return declared;
   const lj = JSON.parse((0, import_node_fs.readFileSync)(lock, "utf8"));
   const packages = lj.packages ?? {};
-  for (const d of deps) {
-    const entry = packages[`node_modules/${d.name}`];
-    if (entry?.version) d.version = entry.version;
+  for (const d of declared) {
+    const v = packages[`node_modules/${d.name}`]?.version;
+    if (v) d.version = v;
   }
+  const seen = new Set(declared.filter((d) => d.version).map((d) => `${d.name}@${d.version}`));
+  const transitive = [];
+  for (const [key, entry] of Object.entries(packages)) {
+    const i = key.lastIndexOf("node_modules/");
+    if (i === -1 || !entry?.version) continue;
+    const name = key.slice(i + "node_modules/".length);
+    const id = `${name}@${entry.version}`;
+    if (!name || seen.has(id)) continue;
+    seen.add(id);
+    transitive.push({ name, range: "", version: entry.version, dev: false, direct: false });
+  }
+  return [...declared, ...transitive];
 }
 function parsePip(content) {
   const deps = [];
@@ -24086,12 +24100,11 @@ function severityOf(v) {
 }
 async function fetchVulns(deps, ecosystem) {
   const out = /* @__PURE__ */ new Map();
-  const versioned = deps.filter((d) => Boolean(d.version));
-  if (versioned.length === 0) return out;
-  const queries = versioned.map((d) => ({
-    package: { name: d.name, ecosystem },
-    version: d.version
-  }));
+  const items = /* @__PURE__ */ new Map();
+  for (const d of deps) if (d.version) items.set(`${d.name}@${d.version}`, { name: d.name, version: d.version });
+  const list = [...items.values()];
+  if (list.length === 0) return out;
+  const queries = list.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
   const results = await cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
     const res = await fetch(`${OSV}/v1/querybatch`, {
       method: "POST",
@@ -24102,8 +24115,8 @@ async function fetchVulns(deps, ecosystem) {
     const data = await res.json();
     return data.results ?? [];
   });
-  const idsByDep = versioned.map((dep, i) => ({ dep, ids: (results[i]?.vulns ?? []).map((v) => v.id) })).filter((x) => x.ids.length > 0);
-  const uniqueIds = [...new Set(idsByDep.flatMap((x) => x.ids))];
+  const idsByItem = list.map((it, i) => ({ it, ids: (results[i]?.vulns ?? []).map((v) => v.id) })).filter((x) => x.ids.length > 0);
+  const uniqueIds = [...new Set(idsByItem.flatMap((x) => x.ids))];
   const details = /* @__PURE__ */ new Map();
   await Promise.all(
     uniqueIds.map(async (id) => {
@@ -24120,9 +24133,9 @@ async function fetchVulns(deps, ecosystem) {
       if (vuln) details.set(id, vuln);
     })
   );
-  for (const { dep, ids } of idsByDep) {
+  for (const { it, ids } of idsByItem) {
     out.set(
-      dep.name,
+      `${it.name}@${it.version}`,
       ids.map((id) => details.get(id)).filter((v) => Boolean(v))
     );
   }
@@ -24307,10 +24320,12 @@ async function analyze(path, opts = {}) {
 }
 async function analyzeManifest(manifest, opts = {}) {
   const { dependencies, ecosystem } = manifest;
+  const directDeps = dependencies.filter((d) => d.direct !== false);
+  const directNames = [...new Set(directDeps.map((d) => d.name))];
   const [vulnMap, registryMap, healthMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
-    opts.latest ? fetchRegistryAll(dependencies.map((d) => d.name), ecosystem) : void 0,
-    opts.health ? fetchHealth(dependencies, ecosystem) : void 0
+    opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
+    opts.health ? fetchHealth(directDeps, ecosystem) : void 0
   ]);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
@@ -24319,7 +24334,8 @@ async function analyzeManifest(manifest, opts = {}) {
       range: d.range,
       version: d.version,
       dev: d.dev,
-      vulns: vulnMap.get(d.name) ?? [],
+      direct: d.direct !== false,
+      vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
       lockstep: lockstepFor(d.name),
       latest: info2?.latest,
       lastPublish: info2?.lastPublish,
@@ -24360,14 +24376,19 @@ function newCveCount(results) {
   let n = 0;
   for (const { report, changes } of results) {
     for (const f of report.findings) {
-      if (changes.has(f.name) && f.verdict === "cve") n += 1;
+      if (f.direct !== false && changes.has(f.name) && f.verdict === "cve") n += 1;
     }
   }
   return n;
 }
 function changedFindings({ report, changes }) {
   const order = { cve: 0, pinned: 1, stale: 2, safe: 3 };
-  return report.findings.filter((f) => changes.has(f.name)).sort((a, b) => order[a.verdict] - order[b.verdict]);
+  return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => order[a.verdict] - order[b.verdict]);
+}
+function transitiveCves(results) {
+  return results.flatMap(
+    (r) => r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0)
+  );
 }
 function renderComment(results) {
   const withChanges = results.filter((r) => r.changes.size > 0);
@@ -24389,6 +24410,14 @@ function renderComment(results) {
       );
     }
     lines.push("");
+  }
+  const transitive = transitiveCves(results);
+  if (transitive.length > 0) {
+    const names = [...new Set(transitive.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+    lines.push(
+      `\u{1F50E} ${transitive.length} transitive ${transitive.length === 1 ? "dependency" : "dependencies"} in the tree carry known CVEs: ${names.join(", ")}${transitive.length > names.length ? ", \u2026" : ""}`,
+      ""
+    );
   }
   const newCves = newCveCount(results);
   lines.push("---");
@@ -24429,7 +24458,8 @@ async function run() {
     try {
       const report = await analyze(path);
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      const changes = diffDeclared(baseDeps, report.findings);
+      const directHead = report.findings.filter((f2) => f2.direct !== false);
+      const changes = diffDeclared(baseDeps, directHead);
       if (changes.size > 0) results.push({ path, report, changes });
     } catch (err) {
       core.warning(`Skipped ${path}: ${err.message}`);

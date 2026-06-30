@@ -14,6 +14,9 @@ export interface Dependency {
   /** Resolved/installed version, when a lockfile was available (drives OSV queries). */
   version?: string;
   dev: boolean;
+  /** Declared in the manifest (`true`) vs pulled in transitively from the lockfile (`false`).
+   * Optional so hand-built objects/tests default to direct; the parser always sets it. */
+  direct?: boolean;
 }
 
 export interface Manifest {
@@ -40,6 +43,8 @@ export interface Finding {
   range: string;
   version?: string;
   dev: boolean;
+  /** `false` when the package is a transitive (indirect) dependency. Defaults to direct. */
+  direct?: boolean;
   vulns: Vuln[];
   lockstep: LockstepInfo;
   latest?: string;

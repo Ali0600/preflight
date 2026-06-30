@@ -49,16 +49,16 @@ describe('fetchVulns', () => {
     { name: 'no-version', range: '^1', dev: false }, // unresolved → never queried
   ];
 
-  it('maps GHSA labels and falls back to the CVSS vector', async () => {
+  it('maps GHSA labels and falls back to the CVSS vector (keyed by name@version)', async () => {
     const map = await fetchVulns(deps, 'npm');
-    expect(map.get('js-yaml')?.[0].severity).toBe('high');
-    expect(map.get('foo')?.[0].severity).toBe('critical'); // derived from the CVSS vector
+    expect(map.get('js-yaml@4.1.0')?.[0].severity).toBe('high');
+    expect(map.get('foo@1.0.0')?.[0].severity).toBe('critical'); // derived from the CVSS vector
   });
 
   it('omits clean deps and never queries unresolved ones', async () => {
     const map = await fetchVulns(deps, 'npm');
-    expect(map.has('clean')).toBe(false);
-    expect(map.has('no-version')).toBe(false);
+    expect(map.has('clean@2.0.0')).toBe(false);
+    expect([...map.keys()].some((k) => k.startsWith('no-version'))).toBe(false);
     const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string;
     expect(body).not.toContain('no-version'); // filtered before the batch query
   });

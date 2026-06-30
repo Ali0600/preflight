@@ -31,10 +31,15 @@ export async function analyzeContent(
 export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions = {}): Promise<Report> {
   const { dependencies, ecosystem } = manifest;
 
+  // OSV scans the whole graph; latest-version + health only apply to deps you control directly
+  // (you don't bump a transitive dep yourself), so scope those lookups to the direct set.
+  const directDeps = dependencies.filter((d) => d.direct !== false);
+  const directNames = [...new Set(directDeps.map((d) => d.name))];
+
   const [vulnMap, registryMap, healthMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
-    opts.latest ? fetchRegistryAll(dependencies.map((d) => d.name), ecosystem) : undefined,
-    opts.health ? fetchHealth(dependencies, ecosystem) : undefined,
+    opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
+    opts.health ? fetchHealth(directDeps, ecosystem) : undefined,
   ]);
 
   const findings: Finding[] = dependencies.map((d) => {
@@ -44,7 +49,8 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       range: d.range,
       version: d.version,
       dev: d.dev,
-      vulns: vulnMap.get(d.name) ?? [],
+      direct: d.direct !== false,
+      vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
       lockstep: lockstepFor(d.name),
       latest: info?.latest,
       lastPublish: info?.lastPublish,

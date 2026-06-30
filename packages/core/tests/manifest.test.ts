@@ -21,6 +21,19 @@ describe('parseManifest — npm', () => {
   it('resolves installed versions from package-lock.json', () => {
     expect(m.dependencies.find((d) => d.name === 'left-pad')?.version).toBe('1.3.0');
     expect(m.dependencies.find((d) => d.name === 'vitest')?.version).toBe('2.1.8');
+    expect(m.dependencies.find((d) => d.name === 'left-pad')?.direct).toBe(true);
+  });
+
+  it('enumerates the full transitive graph from the lockfile', () => {
+    // hoisted transitive (top-level node_modules) + nested transitive
+    expect(m.dependencies.find((d) => d.name === 'tinypool')).toMatchObject({
+      version: '1.0.0',
+      direct: false,
+    });
+    expect(m.dependencies.find((d) => d.name === 'tinyspy')).toMatchObject({
+      version: '3.0.2',
+      direct: false,
+    });
   });
 });
 

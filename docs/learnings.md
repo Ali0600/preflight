@@ -61,3 +61,14 @@ the browser bundle. The Next app also sits outside the root ESLint/`tsc` globs a
 **Takeaway:** In a TS monorepo, a framework that bundles (Next/Vite) can consume source packages
 directly with a transpile hint — no separate build/publish step — but keep runtime-only deps on the
 server and import them as types on the client.
+
+## The lockfile already holds the full dependency graph — scan it, not just the manifest
+A `package.json` lists only *declared* deps, but the `package-lock.json` `packages` map lists **every**
+installed package — direct and transitive — keyed by its `node_modules/…` path (nested for non-hoisted
+copies), each with a resolved `version`. Walking that map (taking the name after the last
+`node_modules/`) yields the whole graph with zero extra API calls.
+**Why it came up:** ~80% of exploitable CVEs come from indirect deps; Preflight was only checking the
+8 declared ones and missing the 352 transitive. The lockfile turned an 8-dep scan into a 360-dep scan
+for free. Keyed vuln results by `name@version` since one package can appear at several versions.
+**Takeaway:** For supply-chain scanning, the lockfile — not the manifest — is the source of truth for
+*what's actually installed*; the manifest only tells you what was *asked for*.

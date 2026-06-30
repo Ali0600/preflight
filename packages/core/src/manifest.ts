@@ -27,7 +27,9 @@ export function parseManifestContent(filename: string, content: string): Manifes
 export function parseManifest(path: string): Manifest {
   ecosystemFor(basename(path)); // reject unsupported types before touching the filesystem
   const manifest = parseManifestContent(path, readFileSync(path, 'utf8'));
-  if (manifest.ecosystem === 'npm') resolveNpmLockVersions(path, manifest.dependencies);
+  if (manifest.ecosystem === 'npm') {
+    manifest.dependencies = enumerateNpmGraph(path, manifest.dependencies);
+  }
   return manifest;
 }
 
@@ -46,25 +48,45 @@ function parseNpm(content: string): Dependency[] {
     // An exactly-pinned range *is* the resolved version (used when no lockfile is available,
     // e.g. a manifest pasted into the dashboard); the lockfile overrides this when present.
     for (const [name, range] of Object.entries(obj ?? {}))
-      deps.push({ name, range, dev, version: exactPin(range) });
+      deps.push({ name, range, dev, version: exactPin(range), direct: true });
   };
   add(pkg.dependencies, false);
   add(pkg.devDependencies, true);
   return deps;
 }
 
-/** Resolve installed versions from the sibling lockfile when present (npm lockfileVersion 2/3). */
-function resolveNpmLockVersions(path: string, deps: Dependency[]): void {
+/**
+ * Expand the declared deps with the whole installed graph from the lockfile. The npm
+ * `packages` map lists every installed package (direct *and* transitive) with its resolved
+ * version — and most exploitable CVEs hide in those indirect deps, so we scan them all.
+ * Declared deps are tagged `direct`; everything else in the graph is `direct: false`.
+ */
+function enumerateNpmGraph(path: string, declared: Dependency[]): Dependency[] {
   const lock = join(dirname(path), 'package-lock.json');
-  if (!existsSync(lock)) return;
+  if (!existsSync(lock)) return declared;
   const lj = JSON.parse(readFileSync(lock, 'utf8')) as {
     packages?: Record<string, { version?: string }>;
   };
   const packages = lj.packages ?? {};
-  for (const d of deps) {
-    const entry = packages[`node_modules/${d.name}`];
-    if (entry?.version) d.version = entry.version;
+
+  // Pin each declared dep to its installed (top-level) version.
+  for (const d of declared) {
+    const v = packages[`node_modules/${d.name}`]?.version;
+    if (v) d.version = v;
   }
+
+  const seen = new Set(declared.filter((d) => d.version).map((d) => `${d.name}@${d.version}`));
+  const transitive: Dependency[] = [];
+  for (const [key, entry] of Object.entries(packages)) {
+    const i = key.lastIndexOf('node_modules/');
+    if (i === -1 || !entry?.version) continue; // skip the root + workspace package entries
+    const name = key.slice(i + 'node_modules/'.length);
+    const id = `${name}@${entry.version}`;
+    if (!name || seen.has(id)) continue;
+    seen.add(id);
+    transitive.push({ name, range: '', version: entry.version, dev: false, direct: false });
+  }
+  return [...declared, ...transitive];
 }
 
 function parsePip(content: string): Dependency[] {
