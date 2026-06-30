@@ -23936,8 +23936,8 @@ var require_github = __commonJS({
 });
 
 // src/index.ts
-var import_node_fs4 = require("fs");
-var import_node_path3 = require("path");
+var import_node_fs5 = require("fs");
+var import_node_path4 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
 
@@ -24669,6 +24669,9 @@ function toSarif(reports) {
 }
 
 // ../core/src/analyze.ts
+var import_node_fs4 = require("fs");
+var import_node_os = require("os");
+var import_node_path3 = require("path");
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
 }
@@ -24951,15 +24954,15 @@ async function runRepoScan(octokit, owner, repo, failOnCve) {
   }
 }
 function writeSarif(reports) {
-  (0, import_node_fs4.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
+  (0, import_node_fs5.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
   core.setOutput("sarif-file", "preflight.sarif");
 }
 function findManifests(root) {
   const skip = /* @__PURE__ */ new Set(["node_modules", "dist", "coverage"]);
   const out = [];
   const walk = (dir) => {
-    for (const e of (0, import_node_fs4.readdirSync)(dir, { withFileTypes: true })) {
-      const p = (0, import_node_path3.join)(dir, e.name);
+    for (const e of (0, import_node_fs5.readdirSync)(dir, { withFileTypes: true })) {
+      const p = (0, import_node_path4.join)(dir, e.name);
       if (e.isDirectory()) {
         if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);
       } else if (MANIFEST.test(e.name)) {
