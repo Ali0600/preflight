@@ -20,4 +20,10 @@ export { decideVerdict } from './verdict';
 export { toCycloneDX } from './sbom';
 export { toSarif } from './sarif';
 export { cached, setCacheEnabled } from './cache';
-export { analyze, analyzeContent, analyzeManifest, type AnalyzeOptions } from './analyze';
+export {
+  analyze,
+  analyzeContent,
+  analyzeFiles,
+  analyzeManifest,
+  type AnalyzeOptions,
+} from './analyze';

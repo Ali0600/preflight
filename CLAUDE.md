@@ -33,7 +33,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
   - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`)
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
-  - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
+  - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
 - `packages/action` (`@preflight/action`) — JS Action. `mode: pr` (default) diffs a PR → sticky
   comment + `fail-level` gate (cve|kev|epss:x); `mode: repo` (scheduled) scans every committed

@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
 import { fetchHealth, type HealthInfo } from './depsdev';
 import { fetchEpss } from './epss';
 import { fetchKev } from './kev';
@@ -28,6 +32,32 @@ export async function analyzeContent(
   opts: AnalyzeOptions = {},
 ): Promise<Report> {
   return analyzeManifest(parseManifestContent(filename, content), opts);
+}
+
+/**
+ * Analyze an in-memory set of manifest files. Writes them to a throwaway temp dir so the npm
+ * lockfile graph resolves (the full transitive scan), then runs `analyze`. Keyless — the caller
+ * supplies the file contents (a web endpoint, a fleet scan), Preflight never reaches for a repo.
+ * Pass e.g. `{ 'package.json': '…', 'package-lock.json': '…' }`.
+ */
+export async function analyzeFiles(
+  files: Record<string, string>,
+  opts: AnalyzeOptions = {},
+): Promise<Report> {
+  const dir = mkdtempSync(join(tmpdir(), 'preflight-'));
+  try {
+    let manifestPath: string | undefined;
+    for (const [name, content] of Object.entries(files)) {
+      const p = join(dir, name);
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, content);
+      if (/(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i.test(name)) manifestPath ??= p;
+    }
+    if (!manifestPath) throw new Error('No package.json or requirements*.txt among the files');
+    return await analyze(manifestPath, opts);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Core pipeline on a parsed manifest: OSV vulns + lockstep (+ latest/health) -> verdict -> report. */
