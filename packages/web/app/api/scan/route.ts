@@ -5,6 +5,8 @@ import { analyzeFiles, setCacheEnabled, type Report } from '@preflight/core';
 // statically cached. Built for the AI-project-dashboard to call per project; see docs/integration.md.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Scanning a large repo's full graph can take a while — give it headroom (Vercel Hobby max is 60s).
+export const maxDuration = 60;
 
 setCacheEnabled(false); // serverless FS is read-only outside /tmp
 
