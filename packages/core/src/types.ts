@@ -17,6 +17,8 @@ export interface Dependency {
   /** Declared in the manifest (`true`) vs pulled in transitively from the lockfile (`false`).
    * Optional so hand-built objects/tests default to direct; the parser always sets it. */
   direct?: boolean;
+  /** Runs a pre/post/install script (npm lockfile `hasInstallScript`) — code on `npm install`. */
+  installScript?: boolean;
 }
 
 export interface Manifest {
@@ -62,6 +64,14 @@ export interface Finding {
   lastPublish?: string;
   /** OpenSSF Scorecard (0–10) from deps.dev, when `--health` is requested. */
   health?: number;
+  /** Failing security-relevant Scorecard checks (name + 0–10 score), when `--health` is requested. */
+  healthChecks?: { name: string; score: number }[];
+  /** True when the package runs an install script (npm) — a supply-chain code-execution surface. */
+  installScript?: boolean;
+  /** SPDX-ish license id (e.g. "MIT", "GPL-3.0"), when `--latest` is requested. */
+  license?: string;
+  /** Set when the name looks like a typosquat of a popular package (offline heuristic). */
+  suspiciousName?: { similarTo: string };
   verdict: Verdict;
   reason: string;
 }

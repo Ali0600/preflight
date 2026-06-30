@@ -24,6 +24,11 @@ describe('parseManifest — npm', () => {
     expect(m.dependencies.find((d) => d.name === 'left-pad')?.direct).toBe(true);
   });
 
+  it('flags packages that run install scripts (lockfile hasInstallScript)', () => {
+    expect(m.dependencies.find((d) => d.name === 'left-pad')?.installScript).toBe(true);
+    expect(m.dependencies.find((d) => d.name === 'vitest')?.installScript).toBeUndefined();
+  });
+
   it('enumerates the full transitive graph from the lockfile', () => {
     // hoisted transitive (top-level node_modules) + nested transitive
     expect(m.dependencies.find((d) => d.name === 'tinypool')).toMatchObject({

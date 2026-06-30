@@ -65,14 +65,15 @@ function enumerateNpmGraph(path: string, declared: Dependency[]): Dependency[] {
   const lock = join(dirname(path), 'package-lock.json');
   if (!existsSync(lock)) return declared;
   const lj = JSON.parse(readFileSync(lock, 'utf8')) as {
-    packages?: Record<string, { version?: string }>;
+    packages?: Record<string, { version?: string; hasInstallScript?: boolean }>;
   };
   const packages = lj.packages ?? {};
 
-  // Pin each declared dep to its installed (top-level) version.
+  // Pin each declared dep to its installed (top-level) version + install-script flag.
   for (const d of declared) {
-    const v = packages[`node_modules/${d.name}`]?.version;
-    if (v) d.version = v;
+    const entry = packages[`node_modules/${d.name}`];
+    if (entry?.version) d.version = entry.version;
+    if (entry?.hasInstallScript) d.installScript = true;
   }
 
   const seen = new Set(declared.filter((d) => d.version).map((d) => `${d.name}@${d.version}`));
@@ -84,7 +85,14 @@ function enumerateNpmGraph(path: string, declared: Dependency[]): Dependency[] {
     const id = `${name}@${entry.version}`;
     if (!name || seen.has(id)) continue;
     seen.add(id);
-    transitive.push({ name, range: '', version: entry.version, dev: false, direct: false });
+    transitive.push({
+      name,
+      range: '',
+      version: entry.version,
+      dev: false,
+      direct: false,
+      installScript: entry.hasInstallScript || undefined,
+    });
   }
   return [...declared, ...transitive];
 }

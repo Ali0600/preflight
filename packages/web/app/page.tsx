@@ -151,8 +151,23 @@ function Row({ finding }: { finding: Finding }) {
       <div className="row-main">
         <div className="row-name">
           {finding.name} <span className="row-ver">{versionCell(finding)}</span>
+          {finding.license && <span className="lic">{finding.license}</span>}
         </div>
         <div className="row-desc">{finding.reason}</div>
+        {finding.suspiciousName && (
+          <div className="row-warn">
+            <i className="ti ti-alert-triangle" aria-hidden /> name resembles{' '}
+            <code>{finding.suspiciousName.similarTo}</code> — confirm it&apos;s intended
+          </div>
+        )}
+        {finding.installScript && (
+          <div className="row-warn">
+            <i className="ti ti-terminal-2" aria-hidden /> runs an install script
+          </div>
+        )}
+        {finding.healthChecks && finding.healthChecks.length > 0 && (
+          <div className="row-desc">weak: {finding.healthChecks.map((c) => c.name).join(', ')}</div>
+        )}
       </div>
       <span className={`badge ${finding.verdict}`}>
         <i className={`ti ${meta.icon}`} aria-hidden /> {meta.label}

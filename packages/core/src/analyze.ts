@@ -1,9 +1,10 @@
-import { fetchScorecard } from './depsdev';
+import { fetchHealth, type HealthInfo } from './depsdev';
 import { fetchEpss } from './epss';
 import { fetchKev } from './kev';
 import { lockstepFor } from './lockstep';
 import { parseManifest, parseManifestContent } from './manifest';
 import { fetchRegistryAll } from './registry';
+import { typosquatOf } from './typosquat';
 import type { Dependency, Ecosystem, Finding, Manifest, Report, Verdict, Vuln } from './types';
 import { fetchVulns } from './osv';
 import { decideVerdict } from './verdict';
@@ -41,23 +42,30 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   const [vulnMap, registryMap, healthMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
-    opts.health ? fetchHealth(directDeps, ecosystem) : undefined,
+    opts.health ? fetchHealthAll(directDeps, ecosystem) : undefined,
   ]);
   await enrichExploitability(vulnMap); // EPSS + KEV — only fires when CVEs were found
 
   const findings: Finding[] = dependencies.map((d) => {
     const info = registryMap?.get(d.name);
+    const health = healthMap?.get(d.name);
+    const direct = d.direct !== false;
     const base = {
       name: d.name,
       range: d.range,
       version: d.version,
       dev: d.dev,
-      direct: d.direct !== false,
+      direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
       lockstep: lockstepFor(d.name),
       latest: info?.latest,
       lastPublish: info?.lastPublish,
-      health: healthMap?.get(d.name),
+      license: info?.license,
+      health: health?.score,
+      healthChecks: health?.checks?.filter((c) => c.score < 7), // surface only the weak spots
+      installScript: d.installScript,
+      // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
+      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : undefined,
     };
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
@@ -87,19 +95,25 @@ async function enrichExploitability(vulnMap: Map<string, Vuln[]>): Promise<void>
   }
 }
 
-/** Scorecards for the versioned deps (deps.dev needs an exact version). */
-async function fetchHealth(
+/** OpenSSF health (overall + per-check) for the versioned deps (deps.dev needs an exact version). */
+async function fetchHealthAll(
   deps: Dependency[],
   ecosystem: Ecosystem,
-): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+): Promise<Map<string, HealthInfo>> {
+  const out = new Map<string, HealthInfo>();
   await Promise.all(
     deps
       .filter((d) => d.version)
       .map(async (d) => {
-        const score = await fetchScorecard(d.name, d.version!, ecosystem);
-        if (score !== undefined) out.set(d.name, score);
+        const health = await fetchHealth(d.name, d.version!, ecosystem);
+        if (health.score !== undefined || health.checks?.length) out.set(d.name, health);
       }),
   );
   return out;
+}
+
+/** Wrap the typosquat heuristic into the Finding's `suspiciousName` shape. */
+function typosquatHit(name: string, ecosystem: Ecosystem): { similarTo: string } | undefined {
+  const similarTo = typosquatOf(name, ecosystem);
+  return similarTo ? { similarTo } : undefined;
 }

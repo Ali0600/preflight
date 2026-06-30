@@ -36,9 +36,14 @@ export function toCycloneDX(report: Report): object {
     name: f.name,
     ...(f.version ? { version: f.version } : {}),
     ...(purl(f, ecosystem) ? { purl: purl(f, ecosystem) } : {}),
+    ...(f.license ? { licenses: [{ license: { id: f.license } }] } : {}),
     properties: [
       { name: 'preflight:direct', value: String(f.direct !== false) },
       { name: 'preflight:verdict', value: f.verdict },
+      ...(f.installScript ? [{ name: 'preflight:install-script', value: 'true' }] : []),
+      ...(f.suspiciousName
+        ? [{ name: 'preflight:typosquat-of', value: f.suspiciousName.similarTo }]
+        : []),
     ],
   }));
 
