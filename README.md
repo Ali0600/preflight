@@ -66,8 +66,27 @@ See [docs/spec.md](docs/spec.md) for the verdict logic and API details, and
 [docs/preflight-checklist.md](docs/preflight-checklist.md) for the broader dependency-hygiene
 practices this tool automates.
 
-## Data sources (all free, no API keys)
-OSV.dev · deps.dev (v3) · npm registry · PyPI JSON · endoflife.date
+## Keyless to run
+
+Every data source Preflight queries is **free, keyless, and accountless** — nothing to sign up for,
+no API key to store, no token to rotate. That's what lets it drop straight into any pipeline (local,
+CI, or the dashboard) with zero configuration.
+
+| Source | What Preflight gets from it | Endpoint |
+| --- | --- | --- |
+| **OSV.dev** | Known vulnerabilities + malicious-package (`MAL-`) advisories → the `cve` / `malware` verdicts + severity | `api.osv.dev` |
+| **FIRST EPSS** | Exploit *probability* (0–1) per CVE — rank what's likely to actually be attacked | `api.first.org/data/v1/epss` |
+| **CISA KEV** | CVEs *confirmed* exploited in the wild — the "patch this now" list | `cisa.gov/.../known_exploited_vulnerabilities.json` |
+| **deps.dev** (v3) | OpenSSF Scorecard (project security health), behind `--health` | `api.deps.dev/v3` |
+| **npm registry** | Latest version + last-publish date → the `stale` verdict + version transitions | `registry.npmjs.org` |
+| **PyPI** (JSON) | Latest version + upload time, for pip manifests | `pypi.org/pypi/{name}/json` |
+
+Every response is cached on disk for 24h (`.preflight-cache/`) to be a good API citizen and make
+re-runs instant.
+
+> **Design principle:** every new check must be *quick, keyless, and accountless*. If a data source
+> needs an account or an API key, it doesn't belong here — that constraint is the whole point, and
+> it's what keeps Preflight a drop-in.
 
 ## Experience Gained
 - Designed a keyless supply-chain analysis **engine** (TypeScript, ESM npm-workspaces monorepo) over
