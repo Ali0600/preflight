@@ -23,7 +23,13 @@ describe('typosquatOf', () => {
     expect(typosquatOf('pg', 'npm')).toBeUndefined();
   });
 
-  it('normalizes scope and separators before comparing', () => {
+  it('normalizes separators before comparing', () => {
     expect(typosquatOf('cross_env', 'npm')).toBeUndefined(); // == cross-env, not a squat
+  });
+
+  it('never flags a scoped package against an unscoped name (regression: @babel/core ≠ cors)', () => {
+    expect(typosquatOf('@babel/core', 'npm')).toBeUndefined();
+    expect(typosquatOf('@dnd-kit/core', 'npm')).toBeUndefined();
+    expect(typosquatOf('@types/node', 'npm')).toBeUndefined();
   });
 });

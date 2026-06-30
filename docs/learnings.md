@@ -87,6 +87,18 @@ surfaced esbuild/sharp/fsevents with zero extra calls.
 **Takeaway:** Don't stop at "known vulnerabilities." The cheapest, highest-signal supply-chain checks
 are the proactive ones, and they're usually a field in data you already have — not a new API.
 
+## A heuristic needs a real corpus, not just hand-picked test cases
+The typosquat unit tests (`lodahs`→`lodash`, `react`→clean) all passed, but the first run across real
+repos flagged `@babel/core` and `@dnd-kit/core` as resembling `cors` — the normalizer stripped the
+`@scope/` and compared the bare `core` (distance 1 from `cors`). Crafted tests confirm *true* positives;
+they rarely contain the long-tail inputs (scoped names, hyphens, unusual lengths) where a fuzzy matcher
+*false*-positives.
+**Why it came up:** `npm run scan:repos` over ~11 real repos surfaced it immediately; no unit test had
+a scoped package one edit from a short popular name.
+**Takeaway:** Before trusting a heuristic/fuzzy matcher, run it over a real corpus and eyeball the
+hits — false positives hide in inputs you didn't think to write a test for. Then add the real-world
+miss as a regression test (here: `@babel/core` → no match).
+
 ## Severity ≠ risk: pair CVSS with EPSS (likelihood) and KEV (confirmed exploitation)
 CVSS scores how *bad* a vuln is if exploited; it's "top-heavy" (lots of 9s/10s) and says nothing about
 whether anyone is actually exploiting it. **EPSS** (FIRST, keyless batch API) gives a 0–1 *probability*

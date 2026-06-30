@@ -45,7 +45,11 @@ npm run check -- examples/requirements.txt --latest   # add latest-version + sta
 npm test                                    # vitest
 npm run build                               # tsup → standalone dist (publishable CLI)
 npm run dev -w @preflight/web               # the dashboard at http://localhost:3000
+npm run scan:repos                          # read-only sweep of all your GitHub repos (needs `gh`)
 ```
+
+`scan:repos` lists your repos via `gh`, pulls each manifest, and prints a ranked cross-repo report —
+it writes nothing to any repo. To gate repos going forward, see [docs/rollout.md](docs/rollout.md).
 
 Example (an Expo app — everything Expo-pinned, nothing to auto-bump):
 ```

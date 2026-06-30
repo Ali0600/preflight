@@ -52,6 +52,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
 - Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
 - Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
 - Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)
+- Fleet scan: `npm run scan:repos` (`scripts/fleet-scan.mts` — read-only sweep of all `gh` repos with a manifest; rollout plan in `docs/rollout.md`)
 - Demo: `npm run check -- ~/grocery-helper/mobile/package.json` → 10 Expo-pinned, 7 safe, 0 CVE.
   `npm run check -- examples/requirements.txt --latest` → 4 CVE, 1 safe (exit 1).
 
