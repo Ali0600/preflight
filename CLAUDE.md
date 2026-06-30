@@ -31,6 +31,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`)
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)

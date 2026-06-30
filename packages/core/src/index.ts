@@ -8,6 +8,14 @@ export { fetchKev } from './kev';
 export { typosquatOf } from './typosquat';
 export { licenseRisk, type LicenseRisk } from './license';
 export { lockstepFor, FRAMEWORK_SETS } from './lockstep';
+export {
+  evaluatePolicy,
+  loadPolicy,
+  meetsVulnLevel,
+  policyNeeds,
+  type Policy,
+  type Violation,
+} from './policy';
 export { decideVerdict } from './verdict';
 export { toCycloneDX } from './sbom';
 export { toSarif } from './sarif';

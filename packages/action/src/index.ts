@@ -3,12 +3,23 @@ import { join } from 'node:path';
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { analyze, parseManifestContent, toSarif, type Dependency, type Report } from '@preflight/core';
+import {
+  analyze,
+  evaluatePolicy,
+  loadPolicy,
+  parseManifestContent,
+  policyNeeds,
+  toSarif,
+  type Dependency,
+  type Policy,
+  type Report,
+} from '@preflight/core';
 
 import {
   diffDeclared,
   newCveCount,
   renderComment,
+  renderPolicySection,
   renderRepoIssue,
   shouldFail,
   ISSUE_MARKER,
@@ -26,11 +37,13 @@ async function run(): Promise<void> {
   const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput('fail-on-cve') !== 'false';
   const failLevel = core.getInput('fail-level') || 'cve';
+  const policyFile = core.getInput('policy-file');
+  const policy = policyFile ? loadPolicy(policyFile) : undefined;
 
   if ((core.getInput('mode') || 'pr') === 'repo') {
     await runRepoScan(octokit, owner, repo, failOnCve);
   } else {
-    await runPrScan(octokit, owner, repo, failOnCve, failLevel);
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
 }
 
@@ -41,6 +54,7 @@ async function runPrScan(
   repo: string,
   failOnCve: boolean,
   failLevel: string,
+  policy?: Policy,
 ): Promise<void> {
   const pr = github.context.payload.pull_request;
   if (!pr) {
@@ -62,11 +76,13 @@ async function runPrScan(
     return;
   }
 
+  // A policy's license/min-health rules need the extra registry/health lookups.
+  const analyzeOpts = policy ? policyNeeds(policy) : {};
   const results: ManifestReport[] = [];
   for (const f of manifests) {
     const path = f.filename;
     try {
-      const report = await analyze(path); // head: reads the checked-out file (+ lockfile) and queries OSV
+      const report = await analyze(path, analyzeOpts); // head: checked-out file (+ lockfile) → OSV
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
       // Diff only the declared (direct) deps — the report also contains the transitive graph.
       const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
@@ -82,12 +98,30 @@ async function runPrScan(
     return;
   }
 
-  await upsertComment(octokit, owner, repo, issue_number, renderComment(results));
+  // Evaluate the policy (if any) against the deps this PR added/bumped.
+  const changedFindings = results.flatMap((r) =>
+    r.report.findings.filter((d) => d.direct !== false && r.changes.has(d.name)),
+  );
+  const policyResult = policy
+    ? evaluatePolicy(changedFindings, policy)
+    : { violations: [], fail: false };
+
+  await upsertComment(
+    octokit,
+    owner,
+    repo,
+    issue_number,
+    renderComment(results) + renderPolicySection(policyResult.violations),
+  );
   core.setOutput('new-cves', newCveCount(results));
-  if (failOnCve && shouldFail(results, failLevel)) {
-    core.setFailed(
-      `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`,
-    );
+
+  // With a policy, the policy decides; otherwise the fail-level does.
+  const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);
+  if (failOnCve && gateFail) {
+    const why = policy
+      ? `it violates the policy (${policyResult.violations.length} violation(s))`
+      : `it meets the fail threshold (fail-level: ${failLevel})`;
+    core.setFailed(`Preflight: this PR introduces a dependency that ${why}.`);
   }
 }
 

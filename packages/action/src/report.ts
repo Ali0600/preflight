@@ -1,6 +1,14 @@
-import type { Report, Verdict } from '@preflight/core';
+import { meetsVulnLevel, type Report, type Verdict, type Violation } from '@preflight/core';
 
 // Pure presentation/diff logic — no @actions/* imports, so it's unit-testable on its own.
+
+/** A "⛔ Policy violations" markdown section for the PR comment, or '' when there are none. */
+export function renderPolicySection(violations: Violation[]): string {
+  if (violations.length === 0) return '';
+  const lines = ['', '### ⛔ Policy violations', '', '| Rule | Package | Detail |', '| --- | --- | --- |'];
+  for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+  return lines.join('\n');
+}
 
 export type ChangeStatus = 'added' | 'bumped';
 
@@ -67,25 +75,14 @@ function changedFindings({ report, changes }: ManifestReport) {
     .sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
 }
 
-/** Whether the gate should fail, given the configured level. malware always fails; `cve` fails on
- * any new CVE; `kev` only on confirmed-exploited; `epss:<x>` on probability ≥ x (or KEV). */
+/** Whether the gate should fail, given the configured level — over the deps this PR changed.
+ * The level semantics (malware/cve/kev/epss:x) live in core's `meetsVulnLevel`, shared with the CLI. */
 export function shouldFail(results: ManifestReport[], level: string): boolean {
-  for (const { report, changes } of results) {
-    for (const f of report.findings) {
-      if (f.direct === false || !changes.has(f.name)) continue;
-      if (f.verdict === 'malware') return true;
-      if (f.verdict !== 'cve') continue;
-      if (level === 'kev') {
-        if (f.vulns.some((v) => v.kev)) return true;
-      } else if (level.startsWith('epss:')) {
-        const t = Number(level.slice(5)) || 0;
-        if (f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t)) return true;
-      } else {
-        return true; // 'cve' (default)
-      }
-    }
-  }
-  return false;
+  return results.some(({ report, changes }) =>
+    report.findings.some(
+      (f) => f.direct !== false && changes.has(f.name) && meetsVulnLevel(f, level),
+    ),
+  );
 }
 
 /** Transitive (indirect) deps anywhere in the scanned tree that carry a CVE. */

@@ -1,0 +1,95 @@
+import { existsSync, readFileSync } from 'node:fs';
+
+import { licenseRisk } from './license';
+import type { Finding } from './types';
+
+// A policy turns Preflight's signals into a configurable gate. It's the same engine the CLI
+// (`--policy`) and the Action (`policy-file`) share — so "what fails the build" lives in one place.
+
+export interface Policy {
+  failOn?: {
+    /** Vulnerability threshold: 'cve' (any), 'kev' (confirmed-exploited), 'epss:<0-1>'. Malware always fails. */
+    vuln?: string;
+    /** Fail if a dependency runs an install script. */
+    installScript?: boolean;
+    /** Fail if a dependency's name looks like a typosquat of a popular package. */
+    suspiciousName?: boolean;
+    /** Fail on these license ids, or the buckets "copyleft" / "unknown". */
+    license?: string[];
+    /** Fail if a direct dependency's OpenSSF health score is below this (0–10). */
+    minHealth?: number;
+  };
+}
+
+export interface Violation {
+  rule: string;
+  dep: string;
+  detail: string;
+}
+
+/** Whether a finding's vulnerabilities meet the threshold. Malware always qualifies; shared with
+ * the Action's PR gate so "cve/kev/epss:x" means the same thing everywhere. */
+export function meetsVulnLevel(f: Finding, level: string): boolean {
+  if (f.verdict === 'malware') return true;
+  if (f.verdict !== 'cve') return false;
+  if (level === 'kev') return f.vulns.some((v) => v.kev);
+  if (level.startsWith('epss:')) {
+    const t = Number(level.slice(5)) || 0;
+    return f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t);
+  }
+  return true; // 'cve' (default)
+}
+
+function licenseDenied(license: string, deny: string[]): boolean {
+  const risk = licenseRisk(license);
+  return deny.some((d) => {
+    const dl = d.toLowerCase();
+    if (dl === 'copyleft' || dl === 'unknown') return risk === dl;
+    return license.toLowerCase() === dl;
+  });
+}
+
+/** Evaluate a policy against findings → the list of violations and whether the gate should fail. */
+export function evaluatePolicy(
+  findings: Finding[],
+  policy: Policy,
+): { violations: Violation[]; fail: boolean } {
+  const rules = policy.failOn ?? {};
+  const violations: Violation[] = [];
+  for (const f of findings) {
+    const at = `${f.name}@${f.version ?? f.range}`;
+    if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
+      violations.push({ rule: 'vuln', dep: at, detail: f.reason });
+    }
+    if (rules.installScript && f.installScript) {
+      violations.push({ rule: 'install-script', dep: at, detail: 'runs an install script' });
+    }
+    if (rules.suspiciousName && f.suspiciousName) {
+      violations.push({ rule: 'suspicious-name', dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
+    }
+    if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
+      violations.push({ rule: 'license', dep: at, detail: f.license });
+    }
+    if (
+      rules.minHealth !== undefined &&
+      f.direct !== false &&
+      f.health !== undefined &&
+      f.health < rules.minHealth
+    ) {
+      violations.push({ rule: 'min-health', dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
+    }
+  }
+  return { violations, fail: violations.length > 0 };
+}
+
+/** Does this policy need latest-version / health data to be evaluated? (drives the fetch flags) */
+export function policyNeeds(policy: Policy): { latest: boolean; health: boolean } {
+  const r = policy.failOn ?? {};
+  return { latest: Boolean(r.license), health: r.minHealth !== undefined };
+}
+
+/** Load a JSON policy file, or an empty policy when the file is absent. */
+export function loadPolicy(path: string): Policy {
+  if (!existsSync(path)) return {};
+  return JSON.parse(readFileSync(path, 'utf8')) as Policy;
+}
