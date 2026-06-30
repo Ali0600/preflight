@@ -23936,6 +23936,8 @@ var require_github = __commonJS({
 });
 
 // src/index.ts
+var import_node_fs3 = require("fs");
+var import_node_path3 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
 
@@ -24124,10 +24126,14 @@ async function fetchVulns(deps, ecosystem) {
         const r = await fetch(`${OSV}/v1/vulns/${id}`);
         if (!r.ok) return void 0;
         const v = await r.json();
+        const malicious = id.startsWith("MAL-");
+        const cve = id.startsWith("CVE-") ? id : (v.aliases ?? []).find((a) => a.startsWith("CVE-"));
         return {
           id,
           summary: v.summary ?? v.details?.slice(0, 120) ?? id,
-          severity: severityOf(v)
+          severity: malicious ? "critical" : severityOf(v),
+          cve,
+          malicious: malicious || void 0
         };
       });
       if (vuln) details.set(id, vuln);
@@ -24207,6 +24213,46 @@ async function fetchScorecard(name, version, ecosystem) {
   });
 }
 
+// ../core/src/epss.ts
+var EPSS = "https://api.first.org/data/v1/epss";
+async function fetchEpss(cveIds) {
+  const out = /* @__PURE__ */ new Map();
+  const ids = [...new Set(cveIds.filter((id) => id.startsWith("CVE-")))];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const rows = await cached(`epss:${chunk.join(",")}`, async () => {
+      try {
+        const r = await fetch(`${EPSS}?cve=${chunk.join(",")}`);
+        if (!r.ok) return [];
+        const j = await r.json();
+        return j.data ?? [];
+      } catch (err) {
+        warn(`EPSS lookup failed: ${err.message}`);
+        return [];
+      }
+    });
+    for (const d of rows) out.set(d.cve, { epss: Number(d.epss), percentile: Number(d.percentile) });
+  }
+  return out;
+}
+
+// ../core/src/kev.ts
+var KEV_FEED = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+async function fetchKev() {
+  const ids = await cached("kev:catalog", async () => {
+    try {
+      const r = await fetch(KEV_FEED);
+      if (!r.ok) return [];
+      const j = await r.json();
+      return (j.vulnerabilities ?? []).map((v) => v.cveID);
+    } catch (err) {
+      warn(`CISA KEV lookup failed: ${err.message}`);
+      return [];
+    }
+  });
+  return new Set(ids);
+}
+
 // ../core/src/lockstep.ts
 var FRAMEWORK_SETS = [
   {
@@ -24277,6 +24323,11 @@ var STALE_AGE_MS = 365 * 24 * 60 * 60 * 1e3;
 function worst(vulns) {
   return vulns.reduce((acc, v) => RANK[v.severity] > RANK[acc] ? v.severity : acc, "unknown");
 }
+function exploitTail(vulns) {
+  if (vulns.some((v) => v.kev)) return " \xB7 actively exploited (KEV)";
+  const maxEpss = Math.max(0, ...vulns.map((v) => v.epss ?? 0));
+  return maxEpss >= 0.1 ? ` \xB7 EPSS ${maxEpss.toFixed(2)}` : "";
+}
 function majorOf(spec) {
   const m = spec?.match(/\d+/);
   return m ? Number(m[0]) : void 0;
@@ -24293,9 +24344,18 @@ function isStale(f) {
   return Number.isFinite(published) && Date.now() - published > STALE_AGE_MS;
 }
 function decideVerdict(f) {
+  if (f.vulns.some((v) => v.malicious)) {
+    return {
+      verdict: "malware",
+      reason: "Known-malicious package (OSV MAL advisory) \u2014 remove immediately"
+    };
+  }
   if (f.vulns.length > 0) {
     const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
-    return { verdict: "cve", reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${tail}` };
+    return {
+      verdict: "cve",
+      reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`
+    };
   }
   if (f.lockstep.pinned) {
     return {
@@ -24314,6 +24374,64 @@ function decideVerdict(f) {
   return { verdict: "safe", reason: "Independent \u2014 safe to auto-update (CI-gated)" };
 }
 
+// ../core/src/sarif.ts
+var LEVEL = {
+  critical: "error",
+  high: "error",
+  medium: "warning",
+  low: "note",
+  unknown: "warning"
+};
+var SECURITY_SEVERITY = {
+  critical: "9.5",
+  high: "7.5",
+  medium: "5.0",
+  low: "2.0",
+  unknown: "0.0"
+};
+function toSarif(reports) {
+  const rules = /* @__PURE__ */ new Map();
+  const results = [];
+  for (const report of reports) {
+    for (const f of report.findings) {
+      for (const v of f.vulns) {
+        if (!rules.has(v.id)) {
+          rules.set(v.id, {
+            id: v.id,
+            name: v.malicious ? "MaliciousPackage" : "KnownVulnerability",
+            shortDescription: { text: v.summary.slice(0, 240) },
+            helpUri: `https://osv.dev/vulnerability/${v.id}`,
+            properties: { "security-severity": SECURITY_SEVERITY[v.severity] }
+          });
+        }
+        const exploited = v.kev ? " \u2014 actively exploited (CISA KEV)" : "";
+        results.push({
+          ruleId: v.id,
+          level: v.malicious ? "error" : LEVEL[v.severity],
+          message: { text: `${f.name}@${f.version ?? f.range}: ${v.summary}${exploited}` },
+          locations: [{ physicalLocation: { artifactLocation: { uri: report.path } } }]
+        });
+      }
+    }
+  }
+  return {
+    version: "2.1.0",
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "Preflight",
+            informationUri: "https://github.com/Ali0600/preflight",
+            rules: [...rules.values()]
+          }
+        },
+        results
+      }
+    ]
+  };
+}
+
 // ../core/src/analyze.ts
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
@@ -24327,6 +24445,7 @@ async function analyzeManifest(manifest, opts = {}) {
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
     opts.health ? fetchHealth(directDeps, ecosystem) : void 0
   ]);
+  await enrichExploitability(vulnMap);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
     const base = {
@@ -24344,9 +24463,24 @@ async function analyzeManifest(manifest, opts = {}) {
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
   });
-  const summary = { safe: 0, pinned: 0, cve: 0, stale: 0 };
+  const summary = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
   for (const f of findings) summary[f.verdict] += 1;
   return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
+}
+async function enrichExploitability(vulnMap) {
+  const vulns = [...new Set([...vulnMap.values()].flat())];
+  const cves = vulns.map((v) => v.cve).filter((c) => Boolean(c));
+  if (cves.length === 0) return;
+  const [epss, kev] = await Promise.all([fetchEpss(cves), fetchKev()]);
+  for (const v of vulns) {
+    if (!v.cve) continue;
+    const e = epss.get(v.cve);
+    if (e) {
+      v.epss = e.epss;
+      v.epssPercentile = e.percentile;
+    }
+    if (kev.has(v.cve)) v.kev = true;
+  }
 }
 async function fetchHealth(deps, ecosystem) {
   const out = /* @__PURE__ */ new Map();
@@ -24361,8 +24495,22 @@ async function fetchHealth(deps, ecosystem) {
 
 // src/report.ts
 var MARKER = "<!-- preflight-action -->";
-var EMOJI = { cve: "\u{1F7E5}", pinned: "\u{1F7E8}", stale: "\u{1F7EA}", safe: "\u{1F7E9}" };
-var LABEL = { cve: "CVE", pinned: "PINNED", stale: "STALE", safe: "SAFE" };
+var ISSUE_MARKER = "<!-- preflight-scheduled -->";
+var EMOJI = {
+  malware: "\u2623\uFE0F",
+  cve: "\u{1F7E5}",
+  pinned: "\u{1F7E8}",
+  stale: "\u{1F7EA}",
+  safe: "\u{1F7E9}"
+};
+var LABEL = {
+  malware: "MALWARE",
+  cve: "CVE",
+  pinned: "PINNED",
+  stale: "STALE",
+  safe: "SAFE"
+};
+var ORDER = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
 function diffDeclared(base, head) {
   const baseRange = new Map(base.map((d) => [d.name, d.range]));
   const changes = /* @__PURE__ */ new Map();
@@ -24382,13 +24530,50 @@ function newCveCount(results) {
   return n;
 }
 function changedFindings({ report, changes }) {
-  const order = { cve: 0, pinned: 1, stale: 2, safe: 3 };
-  return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => order[a.verdict] - order[b.verdict]);
+  return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+}
+function shouldFail(results, level) {
+  for (const { report, changes } of results) {
+    for (const f of report.findings) {
+      if (f.direct === false || !changes.has(f.name)) continue;
+      if (f.verdict === "malware") return true;
+      if (f.verdict !== "cve") continue;
+      if (level === "kev") {
+        if (f.vulns.some((v) => v.kev)) return true;
+      } else if (level.startsWith("epss:")) {
+        const t = Number(level.slice(5)) || 0;
+        if (f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t)) return true;
+      } else {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 function transitiveCves(results) {
   return results.flatMap(
     (r) => r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0)
   );
+}
+function renderRepoIssue(reports) {
+  const risky = (r) => r.findings.filter((f) => f.verdict === "malware" || f.verdict === "cve");
+  const lines = [ISSUE_MARKER, "## \u2708\uFE0F Preflight \u2014 scheduled dependency scan", ""];
+  let count = 0;
+  for (const r of reports) {
+    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    if (findings.length === 0) continue;
+    count += findings.length;
+    lines.push(`### \`${r.path}\` \u2014 ${findings.length}`, "");
+    lines.push("| Verdict | Package | Note |", "| --- | --- | --- |");
+    for (const f of findings) {
+      const tag = f.direct === false ? " _(transitive)_" : "";
+      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\`${tag} | ${f.reason} |`);
+    }
+    lines.push("");
+  }
+  if (count === 0) lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+  lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
+  return { body: lines.join("\n"), count };
 }
 function renderComment(results) {
   const withChanges = results.filter((r) => r.changes.size > 0);
@@ -24430,15 +24615,22 @@ function renderComment(results) {
 // src/index.ts
 var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 async function run() {
-  const token = core.getInput("github-token");
+  const octokit = github.getOctokit(core.getInput("github-token"));
+  const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput("fail-on-cve") !== "false";
+  const failLevel = core.getInput("fail-level") || "cve";
+  if ((core.getInput("mode") || "pr") === "repo") {
+    await runRepoScan(octokit, owner, repo, failOnCve);
+  } else {
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel);
+  }
+}
+async function runPrScan(octokit, owner, repo, failOnCve, failLevel) {
   const pr = github.context.payload.pull_request;
   if (!pr) {
     core.info("Not a pull_request event \u2014 nothing to pre-flight.");
     return;
   }
-  const octokit = github.getOctokit(token);
-  const { owner, repo } = github.context.repo;
   const issue_number = pr.number;
   const baseSha = pr.base?.sha;
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -24458,25 +24650,63 @@ async function run() {
     try {
       const report = await analyze(path);
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      const directHead = report.findings.filter((f2) => f2.direct !== false);
-      const changes = diffDeclared(baseDeps, directHead);
+      const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
       if (changes.size > 0) results.push({ path, report, changes });
     } catch (err) {
       core.warning(`Skipped ${path}: ${err.message}`);
     }
   }
+  writeSarif(results.map((r) => r.report));
   if (results.length === 0) {
     core.info("No added or bumped dependencies to report.");
     return;
   }
   await upsertComment(octokit, owner, repo, issue_number, renderComment(results));
-  const newCves = newCveCount(results);
-  core.setOutput("new-cves", newCves);
-  if (failOnCve && newCves > 0) {
+  core.setOutput("new-cves", newCveCount(results));
+  if (failOnCve && shouldFail(results, failLevel)) {
     core.setFailed(
-      `Preflight: this PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE.`
+      `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`
     );
   }
+}
+async function runRepoScan(octokit, owner, repo, failOnCve) {
+  const paths = findManifests(".");
+  core.info(`Scanning ${paths.length} manifest(s).`);
+  const reports = [];
+  for (const path of paths) {
+    try {
+      reports.push(await analyze(path));
+    } catch (err) {
+      core.warning(`Skipped ${path}: ${err.message}`);
+    }
+  }
+  writeSarif(reports);
+  const { body, count } = renderRepoIssue(reports);
+  await upsertIssue(octokit, owner, repo, body, count > 0);
+  core.setOutput("vuln-count", count);
+  if (failOnCve && count > 0) {
+    core.setFailed(`Preflight: ${count} known vulnerability finding(s) across the repo's manifests.`);
+  }
+}
+function writeSarif(reports) {
+  (0, import_node_fs3.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
+  core.setOutput("sarif-file", "preflight.sarif");
+}
+function findManifests(root) {
+  const skip = /* @__PURE__ */ new Set(["node_modules", "dist", "coverage"]);
+  const out = [];
+  const walk = (dir) => {
+    for (const e of (0, import_node_fs3.readdirSync)(dir, { withFileTypes: true })) {
+      const p = (0, import_node_path3.join)(dir, e.name);
+      if (e.isDirectory()) {
+        if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);
+      } else if (MANIFEST.test(e.name)) {
+        out.push(p);
+      }
+    }
+  };
+  walk(root);
+  return out;
 }
 async function fetchBaseDeps(octokit, owner, repo, path, ref) {
   if (!ref) return [];
@@ -24504,6 +24734,25 @@ async function upsertComment(octokit, owner, repo, issue_number, body) {
     await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
   } else {
     await octokit.rest.issues.createComment({ owner, repo, issue_number, body });
+  }
+}
+async function upsertIssue(octokit, owner, repo, body, createIfMissing) {
+  const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
+    owner,
+    repo,
+    state: "open",
+    per_page: 100
+  });
+  const existing = issues.find((i) => !i.pull_request && i.body?.includes(ISSUE_MARKER));
+  if (existing) {
+    await octokit.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+  } else if (createIfMissing) {
+    await octokit.rest.issues.create({
+      owner,
+      repo,
+      title: "Preflight: dependency vulnerability report",
+      body
+    });
   }
 }
 run().catch((err) => core.setFailed(err.message));

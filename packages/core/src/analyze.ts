@@ -1,8 +1,10 @@
 import { fetchScorecard } from './depsdev';
+import { fetchEpss } from './epss';
+import { fetchKev } from './kev';
 import { lockstepFor } from './lockstep';
 import { parseManifest, parseManifestContent } from './manifest';
 import { fetchRegistryAll } from './registry';
-import type { Dependency, Ecosystem, Finding, Manifest, Report, Verdict } from './types';
+import type { Dependency, Ecosystem, Finding, Manifest, Report, Verdict, Vuln } from './types';
 import { fetchVulns } from './osv';
 import { decideVerdict } from './verdict';
 
@@ -41,6 +43,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
     opts.health ? fetchHealth(directDeps, ecosystem) : undefined,
   ]);
+  await enrichExploitability(vulnMap); // EPSS + KEV — only fires when CVEs were found
 
   const findings: Finding[] = dependencies.map((d) => {
     const info = registryMap?.get(d.name);
@@ -60,10 +63,28 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     return { ...base, verdict, reason };
   });
 
-  const summary: Record<Verdict, number> = { safe: 0, pinned: 0, cve: 0, stale: 0 };
+  const summary: Record<Verdict, number> = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
   for (const f of findings) summary[f.verdict] += 1;
 
   return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
+}
+
+/** Attach EPSS (exploit probability) + CISA KEV (confirmed-exploited) to each found advisory.
+ * Vuln objects are shared by reference across deps, so enriching the distinct set updates all. */
+async function enrichExploitability(vulnMap: Map<string, Vuln[]>): Promise<void> {
+  const vulns = [...new Set([...vulnMap.values()].flat())];
+  const cves = vulns.map((v) => v.cve).filter((c): c is string => Boolean(c));
+  if (cves.length === 0) return;
+  const [epss, kev] = await Promise.all([fetchEpss(cves), fetchKev()]);
+  for (const v of vulns) {
+    if (!v.cve) continue;
+    const e = epss.get(v.cve);
+    if (e) {
+      v.epss = e.epss;
+      v.epssPercentile = e.percentile;
+    }
+    if (kev.has(v.cve)) v.kev = true;
+  }
 }
 
 /** Scorecards for the versioned deps (deps.dev needs an exact version). */

@@ -9,6 +9,13 @@ function worst(vulns: Vuln[]): Severity {
   return vulns.reduce<Severity>((acc, v) => (RANK[v.severity] > RANK[acc] ? v.severity : acc), 'unknown');
 }
 
+/** A short exploitability note for a CVE reason: confirmed-exploited (KEV) beats predicted (EPSS). */
+function exploitTail(vulns: Vuln[]): string {
+  if (vulns.some((v) => v.kev)) return ' · actively exploited (KEV)';
+  const maxEpss = Math.max(0, ...vulns.map((v) => v.epss ?? 0));
+  return maxEpss >= 0.1 ? ` · EPSS ${maxEpss.toFixed(2)}` : '';
+}
+
 /** Leading major version from a resolved version or a range (e.g. "^1.2.0" -> 1, "0.85.3" -> 0). */
 function majorOf(spec: string | undefined): number | undefined {
   const m = spec?.match(/\d+/);
@@ -35,11 +42,20 @@ export function decideVerdict(f: Omit<Finding, 'verdict' | 'reason'>): {
   verdict: Finding['verdict'];
   reason: string;
 } {
+  if (f.vulns.some((v) => v.malicious)) {
+    return {
+      verdict: 'malware',
+      reason: 'Known-malicious package (OSV MAL advisory) — remove immediately',
+    };
+  }
   if (f.vulns.length > 0) {
     const tail = f.lockstep.pinned
       ? ` · framework-pinned (${f.lockstep.framework}) — fix via ${f.lockstep.tool}`
       : '';
-    return { verdict: 'cve', reason: `${f.vulns.length} advisory · ${worst(f.vulns)}${tail}` };
+    return {
+      verdict: 'cve',
+      reason: `${f.vulns.length} advisory · ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`,
+    };
   }
   if (f.lockstep.pinned) {
     return {

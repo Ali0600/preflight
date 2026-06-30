@@ -7,6 +7,14 @@
     "preflight": "./dist/index.js"
   },
   "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ali0600/preflight.git",
+    "directory": "packages/cli"
+  },
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "npm run build"

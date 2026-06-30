@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write # upload the SARIF to the Security tab
 
 concurrency:
   group: preflight-${{ github.ref }}
@@ -20,4 +21,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ./packages/action
+      - id: preflight
+        uses: ./packages/action
+      - name: Upload findings to the Security tab
+        if: always() && hashFiles('preflight.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: preflight.sarif

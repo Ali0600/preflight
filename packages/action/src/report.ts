@@ -12,9 +12,24 @@ interface Declared {
 
 /** Marker so we can find & update our own sticky comment instead of posting a new one each push. */
 export const MARKER = '<!-- preflight-action -->';
+/** Marker on the scheduled-scan tracking issue. */
+export const ISSUE_MARKER = '<!-- preflight-scheduled -->';
 
-const EMOJI: Record<Verdict, string> = { cve: '🟥', pinned: '🟨', stale: '🟪', safe: '🟩' };
-const LABEL: Record<Verdict, string> = { cve: 'CVE', pinned: 'PINNED', stale: 'STALE', safe: 'SAFE' };
+const EMOJI: Record<Verdict, string> = {
+  malware: '☣️',
+  cve: '🟥',
+  pinned: '🟨',
+  stale: '🟪',
+  safe: '🟩',
+};
+const LABEL: Record<Verdict, string> = {
+  malware: 'MALWARE',
+  cve: 'CVE',
+  pinned: 'PINNED',
+  stale: 'STALE',
+  safe: 'SAFE',
+};
+const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
 
 export interface ManifestReport {
   path: string;
@@ -47,10 +62,30 @@ export function newCveCount(results: ManifestReport[]): number {
 
 /** Findings for the direct deps this PR added/bumped, worst verdict first. */
 function changedFindings({ report, changes }: ManifestReport) {
-  const order: Record<Verdict, number> = { cve: 0, pinned: 1, stale: 2, safe: 3 };
   return report.findings
     .filter((f) => f.direct !== false && changes.has(f.name))
-    .sort((a, b) => order[a.verdict] - order[b.verdict]);
+    .sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+}
+
+/** Whether the gate should fail, given the configured level. malware always fails; `cve` fails on
+ * any new CVE; `kev` only on confirmed-exploited; `epss:<x>` on probability ≥ x (or KEV). */
+export function shouldFail(results: ManifestReport[], level: string): boolean {
+  for (const { report, changes } of results) {
+    for (const f of report.findings) {
+      if (f.direct === false || !changes.has(f.name)) continue;
+      if (f.verdict === 'malware') return true;
+      if (f.verdict !== 'cve') continue;
+      if (level === 'kev') {
+        if (f.vulns.some((v) => v.kev)) return true;
+      } else if (level.startsWith('epss:')) {
+        const t = Number(level.slice(5)) || 0;
+        if (f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t)) return true;
+      } else {
+        return true; // 'cve' (default)
+      }
+    }
+  }
+  return false;
 }
 
 /** Transitive (indirect) deps anywhere in the scanned tree that carry a CVE. */
@@ -58,6 +93,31 @@ function transitiveCves(results: ManifestReport[]) {
   return results.flatMap((r) =>
     r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0),
   );
+}
+
+/** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests. */
+export function renderRepoIssue(reports: Report[]): { body: string; count: number } {
+  const risky = (r: Report) =>
+    r.findings.filter((f) => f.verdict === 'malware' || f.verdict === 'cve');
+  const lines = [ISSUE_MARKER, '## ✈️ Preflight — scheduled dependency scan', ''];
+  let count = 0;
+
+  for (const r of reports) {
+    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    if (findings.length === 0) continue;
+    count += findings.length;
+    lines.push(`### \`${r.path}\` — ${findings.length}`, '');
+    lines.push('| Verdict | Package | Note |', '| --- | --- | --- |');
+    for (const f of findings) {
+      const tag = f.direct === false ? ' _(transitive)_' : '';
+      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\`${tag} | ${f.reason} |`);
+    }
+    lines.push('');
+  }
+
+  if (count === 0) lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+  lines.push(`_Last scanned ${new Date().toISOString().slice(0, 10)}._`);
+  return { body: lines.join('\n'), count };
 }
 
 /** Render the full sticky PR comment (Markdown). Returns just the body. */

@@ -72,3 +72,16 @@ copies), each with a resolved `version`. Walking that map (taking the name after
 for free. Keyed vuln results by `name@version` since one package can appear at several versions.
 **Takeaway:** For supply-chain scanning, the lockfile — not the manifest — is the source of truth for
 *what's actually installed*; the manifest only tells you what was *asked for*.
+
+## Severity ≠ risk: pair CVSS with EPSS (likelihood) and KEV (confirmed exploitation)
+CVSS scores how *bad* a vuln is if exploited; it's "top-heavy" (lots of 9s/10s) and says nothing about
+whether anyone is actually exploiting it. **EPSS** (FIRST, keyless batch API) gives a 0–1 *probability*
+of exploitation in the next 30 days — and it's "bottom-heavy", so most CVEs score <0.05. **CISA KEV**
+is the certainty layer: a free JSON feed of CVEs *confirmed* exploited in the wild. Together they turn
+"40 critical CVEs" into "the 2 that are actually being exploited."
+**Why it came up:** Preflight graded severity from CVSS alone (Dependabot's exact weakness). Adding
+EPSS+KEV let the CI gate fire on *exploitability* (`fail-level: kev` / `epss:0.5`), not just any CVE.
+A live check confirmed the design: 19 urllib3 CVEs all scored EPSS <0.03 — correctly *not* flagged as
+urgent, where CVSS would have screamed "high" at all of them.
+**Takeaway:** Map advisories to their CVE alias and enrich with EPSS+KEV before ranking; "critical
+severity" is a starting point for triage, not a priority. Bottom-heavy EPSS is a feature, not a bug.

@@ -10,6 +10,8 @@ interface OsvDetail {
   id: string;
   summary?: string;
   details?: string;
+  /** Other ids for the same advisory (CVE-…, GHSA-…); used to find the CVE for EPSS/KEV. */
+  aliases?: string[];
   /** Top-level CVSS scores; `score` is a vector string for CVSS types. */
   severity?: { type?: string; score?: string }[];
   /** Free-form; GitHub advisories put a qualitative label here (LOW/MODERATE/HIGH/CRITICAL). */
@@ -75,10 +77,15 @@ export async function fetchVulns(
         const r = await fetch(`${OSV}/v1/vulns/${id}`);
         if (!r.ok) return undefined;
         const v = (await r.json()) as OsvDetail;
+        // OSV uses `MAL-…` ids for known-malicious packages (typosquats, compromised releases).
+        const malicious = id.startsWith('MAL-');
+        const cve = id.startsWith('CVE-') ? id : (v.aliases ?? []).find((a) => a.startsWith('CVE-'));
         return {
           id,
           summary: v.summary ?? v.details?.slice(0, 120) ?? id,
-          severity: severityOf(v),
+          severity: malicious ? 'critical' : severityOf(v),
+          cve,
+          malicious: malicious || undefined,
         };
       });
       if (vuln) details.set(id, vuln);

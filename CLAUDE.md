@@ -21,18 +21,23 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
     each `Finding`/`Dependency` tagged `direct`) / requirements.txt. OSV scans the whole graph;
     `--latest`/`--health` apply to direct deps only.
-  - `osv.ts` — OSV.dev client (querybatch for presence, then vuln details)
+  - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
+  - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
   - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
   - `registry.ts` — latest version + last-publish date (npm registry / PyPI)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard (2-hop; wired behind `--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
-  - `verdict.ts` — combine → `safe | pinned | cve | stale` (`stale` needs `--latest` data)
-  - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report`
+  - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
+  - `analyze.ts` — orchestrator: `analyze(path, opts) -> Report` (enriches vulns with EPSS+KEV when CVEs exist)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
-- `packages/action` (`@preflight/action`) — Stage 2 JS Action: diff a PR's manifests → sticky
-  comment + fail on new CVE. `report.ts` is pure (testable); `index.ts` is octokit glue. Bundled
-  to a **committed** `dist/index.js` (tsup, CJS) because Actions run from source with no install.
+- `packages/action` (`@preflight/action`) — JS Action. `mode: pr` (default) diffs a PR → sticky
+  comment + `fail-level` gate (cve|kev|epss:x); `mode: repo` (scheduled) scans every committed
+  manifest → tracking issue. Writes `preflight.sarif` (uploaded to the Security tab). `report.ts`
+  pure/testable; `index.ts` octokit glue. **Committed** `dist/index.js` (tsup, CJS — Actions run
+  from source). Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml`
+  (tag → `npm publish @preflight/cli --provenance`).
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` route (Node runtime, `setCacheEnabled(false)`) → `analyzeContent()` → metric cards +
   findings, matching `docs/dashboard-mockup.html`. Engine pulled in via `transpilePackages`; excluded
@@ -40,7 +45,7 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
 
 ## Commands
 - Install: `npm install`
-- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--latest`, `--health`, `--no-cache`)
+- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--sbom [file]`, `--latest`, `--health`, `--no-cache`)
 - Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
 - Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
 - Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)
