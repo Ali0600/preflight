@@ -23936,7 +23936,7 @@ var require_github = __commonJS({
 });
 
 // src/index.ts
-var import_node_fs3 = require("fs");
+var import_node_fs4 = require("fs");
 var import_node_path3 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
@@ -24427,6 +24427,16 @@ function typosquatOf(name, ecosystem) {
   return void 0;
 }
 
+// ../core/src/license.ts
+var COPYLEFT = /\b(a?gpl|lgpl|mpl|epl|cddl|osl|eupl|cpal|sleepycat)\b/i;
+var PERMISSIVE = /\b(mit|apache|bsd|isc|0bsd|unlicense|wtfpl|zlib|cc0|python|psf)\b/i;
+function licenseRisk(license) {
+  if (!license) return "unknown";
+  if (COPYLEFT.test(license)) return "copyleft";
+  if (PERMISSIVE.test(license)) return "permissive";
+  return "unknown";
+}
+
 // ../core/src/lockstep.ts
 var FRAMEWORK_SETS = [
   {
@@ -24489,6 +24499,58 @@ function lockstepFor(name) {
     }
   }
   return { pinned: false };
+}
+
+// ../core/src/policy.ts
+var import_node_fs3 = require("fs");
+function meetsVulnLevel(f, level) {
+  if (f.verdict === "malware") return true;
+  if (f.verdict !== "cve") return false;
+  if (level === "kev") return f.vulns.some((v) => v.kev);
+  if (level.startsWith("epss:")) {
+    const t = Number(level.slice(5)) || 0;
+    return f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t);
+  }
+  return true;
+}
+function licenseDenied(license, deny) {
+  const risk = licenseRisk(license);
+  return deny.some((d) => {
+    const dl = d.toLowerCase();
+    if (dl === "copyleft" || dl === "unknown") return risk === dl;
+    return license.toLowerCase() === dl;
+  });
+}
+function evaluatePolicy(findings, policy) {
+  const rules = policy.failOn ?? {};
+  const violations = [];
+  for (const f of findings) {
+    const at = `${f.name}@${f.version ?? f.range}`;
+    if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
+      violations.push({ rule: "vuln", dep: at, detail: f.reason });
+    }
+    if (rules.installScript && f.installScript) {
+      violations.push({ rule: "install-script", dep: at, detail: "runs an install script" });
+    }
+    if (rules.suspiciousName && f.suspiciousName) {
+      violations.push({ rule: "suspicious-name", dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
+    }
+    if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
+      violations.push({ rule: "license", dep: at, detail: f.license });
+    }
+    if (rules.minHealth !== void 0 && f.direct !== false && f.health !== void 0 && f.health < rules.minHealth) {
+      violations.push({ rule: "min-health", dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
+    }
+  }
+  return { violations, fail: violations.length > 0 };
+}
+function policyNeeds(policy) {
+  const r = policy.failOn ?? {};
+  return { latest: Boolean(r.license), health: r.minHealth !== void 0 };
+}
+function loadPolicy(path) {
+  if (!(0, import_node_fs3.existsSync)(path)) return {};
+  return JSON.parse((0, import_node_fs3.readFileSync)(path, "utf8"));
 }
 
 // ../core/src/verdict.ts
@@ -24680,6 +24742,12 @@ function typosquatHit(name, ecosystem) {
 }
 
 // src/report.ts
+function renderPolicySection(violations) {
+  if (violations.length === 0) return "";
+  const lines = ["", "### \u26D4 Policy violations", "", "| Rule | Package | Detail |", "| --- | --- | --- |"];
+  for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+  return lines.join("\n");
+}
 var MARKER = "<!-- preflight-action -->";
 var ISSUE_MARKER = "<!-- preflight-scheduled -->";
 var EMOJI = {
@@ -24719,22 +24787,11 @@ function changedFindings({ report, changes }) {
   return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
 }
 function shouldFail(results, level) {
-  for (const { report, changes } of results) {
-    for (const f of report.findings) {
-      if (f.direct === false || !changes.has(f.name)) continue;
-      if (f.verdict === "malware") return true;
-      if (f.verdict !== "cve") continue;
-      if (level === "kev") {
-        if (f.vulns.some((v) => v.kev)) return true;
-      } else if (level.startsWith("epss:")) {
-        const t = Number(level.slice(5)) || 0;
-        if (f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t)) return true;
-      } else {
-        return true;
-      }
-    }
-  }
-  return false;
+  return results.some(
+    ({ report, changes }) => report.findings.some(
+      (f) => f.direct !== false && changes.has(f.name) && meetsVulnLevel(f, level)
+    )
+  );
 }
 function transitiveCves(results) {
   return results.flatMap(
@@ -24811,13 +24868,15 @@ async function run() {
   const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput("fail-on-cve") !== "false";
   const failLevel = core.getInput("fail-level") || "cve";
+  const policyFile = core.getInput("policy-file");
+  const policy = policyFile ? loadPolicy(policyFile) : void 0;
   if ((core.getInput("mode") || "pr") === "repo") {
     await runRepoScan(octokit, owner, repo, failOnCve);
   } else {
-    await runPrScan(octokit, owner, repo, failOnCve, failLevel);
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
 }
-async function runPrScan(octokit, owner, repo, failOnCve, failLevel) {
+async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
   const pr = github.context.payload.pull_request;
   if (!pr) {
     core.info("Not a pull_request event \u2014 nothing to pre-flight.");
@@ -24836,11 +24895,12 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel) {
     core.info("No dependency manifests changed in this PR.");
     return;
   }
+  const analyzeOpts = policy ? policyNeeds(policy) : {};
   const results = [];
   for (const f of manifests) {
     const path = f.filename;
     try {
-      const report = await analyze(path);
+      const report = await analyze(path, analyzeOpts);
       const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
       const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
       if (changes.size > 0) results.push({ path, report, changes });
@@ -24853,12 +24913,22 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel) {
     core.info("No added or bumped dependencies to report.");
     return;
   }
-  await upsertComment(octokit, owner, repo, issue_number, renderComment(results));
+  const changedFindings2 = results.flatMap(
+    (r) => r.report.findings.filter((d) => d.direct !== false && r.changes.has(d.name))
+  );
+  const policyResult = policy ? evaluatePolicy(changedFindings2, policy) : { violations: [], fail: false };
+  await upsertComment(
+    octokit,
+    owner,
+    repo,
+    issue_number,
+    renderComment(results) + renderPolicySection(policyResult.violations)
+  );
   core.setOutput("new-cves", newCveCount(results));
-  if (failOnCve && shouldFail(results, failLevel)) {
-    core.setFailed(
-      `Preflight: this PR introduces a dependency that meets the fail threshold (fail-level: ${failLevel}).`
-    );
+  const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);
+  if (failOnCve && gateFail) {
+    const why = policy ? `it violates the policy (${policyResult.violations.length} violation(s))` : `it meets the fail threshold (fail-level: ${failLevel})`;
+    core.setFailed(`Preflight: this PR introduces a dependency that ${why}.`);
   }
 }
 async function runRepoScan(octokit, owner, repo, failOnCve) {
@@ -24881,14 +24951,14 @@ async function runRepoScan(octokit, owner, repo, failOnCve) {
   }
 }
 function writeSarif(reports) {
-  (0, import_node_fs3.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
+  (0, import_node_fs4.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
   core.setOutput("sarif-file", "preflight.sarif");
 }
 function findManifests(root) {
   const skip = /* @__PURE__ */ new Set(["node_modules", "dist", "coverage"]);
   const out = [];
   const walk = (dir) => {
-    for (const e of (0, import_node_fs3.readdirSync)(dir, { withFileTypes: true })) {
+    for (const e of (0, import_node_fs4.readdirSync)(dir, { withFileTypes: true })) {
       const p = (0, import_node_path3.join)(dir, e.name);
       if (e.isDirectory()) {
         if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);

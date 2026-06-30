@@ -21,6 +21,10 @@ inputs:
     description: '"pr" (default) diffs the PR and comments; "repo" scans every committed manifest and opens/updates a tracking issue (for scheduled runs).'
     required: false
     default: 'pr'
+  policy-file:
+    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level — instead of fail-level.'
+    required: false
+    default: ''
 runs:
   using: 'node20'
   main: 'dist/index.js'

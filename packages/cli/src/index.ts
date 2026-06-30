@@ -3,12 +3,16 @@ import { writeFileSync } from 'node:fs';
 
 import {
   analyze,
+  evaluatePolicy,
   licenseRisk,
+  loadPolicy,
+  policyNeeds,
   setCacheEnabled,
   toCycloneDX,
   type Finding,
   type Report,
   type Verdict,
+  type Violation,
 } from '@preflight/core';
 import { Command } from 'commander';
 import pc from 'picocolors';
@@ -98,6 +102,16 @@ function printReport(r: Report): void {
   console.log();
 }
 
+function printPolicy(file: string, violations: Violation[]): void {
+  // To stderr, so it never pollutes --json / --sbom stdout.
+  if (violations.length === 0) {
+    console.error(pc.green(`\n✓ policy ok (${file})`));
+    return;
+  }
+  console.error(pc.red(`\n✗ ${violations.length} policy violation(s) (${file}):`));
+  for (const v of violations) console.error(pc.red(`  · ${v.rule}: ${v.dep} — ${v.detail}`));
+}
+
 const program = new Command();
 
 program
@@ -112,6 +126,7 @@ program
   .option('--sbom [file]', 'emit a CycloneDX SBOM (to <file>, or stdout if omitted)')
   .option('--latest', "fetch each dep's latest version + last-publish date (enables 'stale')")
   .option('--health', "fetch each dep's OpenSSF Scorecard from deps.dev")
+  .option('--policy [file]', 'gate the run against a policy file (default ./preflight.config.json)')
   .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
   .action(
     async (
@@ -121,13 +136,26 @@ program
         sbom?: boolean | string;
         latest?: boolean;
         health?: boolean;
+        policy?: boolean | string;
         cache?: boolean;
       },
     ) => {
       if (opts.cache === false) setCacheEnabled(false);
+      // Load the policy first — its rules decide whether we need latest-version / health data.
+      const policyFile =
+        opts.policy === undefined
+          ? undefined
+          : typeof opts.policy === 'string'
+            ? opts.policy
+            : 'preflight.config.json';
+      const policy = policyFile ? loadPolicy(policyFile) : undefined;
+      const need = policy ? policyNeeds(policy) : { latest: false, health: false };
       let report: Report;
       try {
-        report = await analyze(path, { latest: opts.latest, health: opts.health });
+        report = await analyze(path, {
+          latest: opts.latest || need.latest,
+          health: opts.health || need.health,
+        });
       } catch (err) {
         console.error(pc.red(`preflight: ${(err as Error).message}`));
         process.exitCode = 1;
@@ -146,8 +174,14 @@ program
       } else {
         printReport(report);
       }
-      // Non-zero exit when any dependency carries a CVE or is malicious, so CI can gate on it.
-      if (report.summary.cve > 0 || report.summary.malware > 0) process.exitCode = 1;
+      if (policy && policyFile) {
+        const { violations, fail } = evaluatePolicy(report.findings, policy);
+        printPolicy(policyFile, violations);
+        if (fail) process.exitCode = 1;
+      } else {
+        // Default gate: non-zero exit when any dependency carries a CVE or is malicious.
+        if (report.summary.cve > 0 || report.summary.malware > 0) process.exitCode = 1;
+      }
     },
   );
 

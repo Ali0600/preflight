@@ -69,6 +69,32 @@ See [docs/spec.md](docs/spec.md) for the verdict logic and API details, and
 [docs/preflight-checklist.md](docs/preflight-checklist.md) for the broader dependency-hygiene
 practices this tool automates.
 
+## Policy gate
+
+By default `preflight check` (and the Action) fail on any new CVE. For finer control, drop a
+`preflight.config.json` and pass `--policy` (CLI) or set `policy-file:` (Action) — the same gate,
+evaluated by `@preflight/core`:
+
+```json
+{
+  "failOn": {
+    "vuln": "kev",
+    "installScript": true,
+    "suspiciousName": true,
+    "license": ["copyleft"],
+    "minHealth": 5
+  }
+}
+```
+
+- `vuln` — `"cve"` (any), `"kev"` (confirmed-exploited only), or `"epss:0.5"` (exploit probability ≥ x).
+- `installScript` / `suspiciousName` — fail on a dep that runs an install script / has a typosquat-like name.
+- `license` — fail on these license ids, or the buckets `"copyleft"` / `"unknown"`.
+- `minHealth` — fail if a *direct* dep's OpenSSF score is below this.
+
+Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
+need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.
+
 ## Keyless to run
 
 Every data source Preflight queries is **free, keyless, and accountless** — nothing to sign up for,
@@ -111,6 +137,9 @@ re-runs instant.
 - Added proactive, pre-CVE supply-chain signals: **install-script** detection, an **offline typosquat
   heuristic** (Damerau-Levenshtein vs a bundled popular-package list), **license-risk** bucketing, and
   an **OpenSSF Scorecard** per-check breakdown — the risk a vulnerability feed can't tell you about.
+- Unified every signal into a configurable **policy-as-code gate** (`preflight.config.json`) shared by
+  the CLI and the Action — one source of truth for what fails the build (denied license, install
+  script, typosquat, min-health floor, or a tunable CVE/KEV/EPSS threshold).
 
 ## License
 MIT (intended).

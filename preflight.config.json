@@ -1,0 +1,7 @@
+{
+  "failOn": {
+    "vuln": "kev",
+    "installScript": false,
+    "suspiciousName": true
+  }
+}
