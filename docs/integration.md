@@ -102,6 +102,12 @@ Then a card reads `summary.cve` / `summary.malware` / `findings` and renders it 
 each project tile, a panel, whatever fits the kanban). The `Report` shape is in
 `packages/core/src/types.ts`.
 
+> **Monorepos:** the helper above fetches the repo *root* only. Many repos (e.g. `grocery-helper`)
+> keep their manifests one level down (`backend/`, `mobile/`). To cover those, list the repo's
+> top-level dirs (`GET /repos/{repo}/contents`, skip `node_modules`/build/test dirs) and scan each —
+> exactly what `scripts/fleet-scan.mts` (`listSubdirs`) does. A project can then have several reports
+> (one per sub-project); show the worst, or a badge per sub-project.
+
 ---
 
 ## Path A — run the engine in-process (no second service)
