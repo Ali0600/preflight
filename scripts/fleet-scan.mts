@@ -70,6 +70,49 @@ function highlights(s: Scan): string[] {
     );
 }
 
+// Dirs that never hold a project's own manifest — skip them when looking one level down.
+const SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'out', 'coverage', '.next', 'vendor',
+  'examples', 'example', 'test', 'tests', '__tests__', 'fixtures', '.git',
+]);
+
+/** Immediate subdirectories worth probing for a manifest (many repos are monorepos: backend/, mobile/). */
+function listSubdirs(repo: string): string[] {
+  try {
+    const names = JSON.parse(
+      gh(['api', `repos/${repo}/contents`, '--jq', '[.[] | select(.type=="dir") | .name]']),
+    ) as string[];
+    return names.filter((d) => !d.startsWith('.') && !SKIP_DIRS.has(d));
+  } catch {
+    return [];
+  }
+}
+
+/** Analyze any manifests in one directory of the repo (`prefix` '' = root, else 'backend/'). */
+async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
+  const pkg = fetchFile(repo, `${prefix}package.json`);
+  const req = fetchFile(repo, `${prefix}requirements.txt`);
+  if (!pkg && !req) return [];
+
+  const out: Scan[] = [];
+  const tmp = mkdtempSync(join(tmpdir(), 'preflight-'));
+  try {
+    if (pkg) {
+      writeFileSync(join(tmp, 'package.json'), pkg);
+      const lock = fetchFile(repo, `${prefix}package-lock.json`); // gives the full transitive graph
+      if (lock) writeFileSync(join(tmp, 'package-lock.json'), lock);
+      out.push({ repo, manifest: `${prefix}package.json`, report: await analyze(join(tmp, 'package.json')) });
+    }
+    if (req) {
+      writeFileSync(join(tmp, 'requirements.txt'), req);
+      out.push({ repo, manifest: `${prefix}requirements.txt`, report: await analyze(join(tmp, 'requirements.txt')) });
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const asJson = process.argv.includes('--json');
   process.stderr.write('Listing repos…\n');
@@ -81,27 +124,18 @@ async function main(): Promise<void> {
 
   const scans: Scan[] = [];
   for (const repo of repos) {
-    const pkg = fetchFile(repo, 'package.json');
-    const req = fetchFile(repo, 'requirements.txt');
-    if (!pkg && !req) continue; // scope: only repos with a manifest
-
-    const dir = mkdtempSync(join(tmpdir(), 'preflight-'));
     try {
-      if (pkg) {
-        writeFileSync(join(dir, 'package.json'), pkg);
-        const lock = fetchFile(repo, 'package-lock.json'); // gives the full transitive graph
-        if (lock) writeFileSync(join(dir, 'package-lock.json'), lock);
-        scans.push({ repo, manifest: 'package.json', report: await analyze(join(dir, 'package.json')) });
+      // Check the repo root plus one level down, so monorepo sub-projects (backend/, mobile/) count.
+      const prefixes = ['', ...listSubdirs(repo).map((d) => `${d}/`)];
+      let found = 0;
+      for (const prefix of prefixes) {
+        const dirScans = await scanDir(repo, prefix);
+        scans.push(...dirScans);
+        found += dirScans.length;
       }
-      if (req) {
-        writeFileSync(join(dir, 'requirements.txt'), req);
-        scans.push({ repo, manifest: 'requirements.txt', report: await analyze(join(dir, 'requirements.txt')) });
-      }
-      process.stderr.write(`  scanned ${repo}\n`);
+      if (found > 0) process.stderr.write(`  scanned ${repo} (${found} manifest${found > 1 ? 's' : ''})\n`);
     } catch (err) {
       process.stderr.write(`  ! ${repo}: ${(err as Error).message}\n`);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
     }
   }
 
@@ -113,7 +147,8 @@ async function main(): Promise<void> {
   }
 
   const risky = scans.filter((s) => riskScore(s.report) > 0);
-  const clean = scans.filter((s) => riskScore(s.report) === 0);
+  // A repo counts as clean only if *none* of its manifests are risky (a monorepo may have both).
+  const riskyRepos = new Set(risky.map((s) => s.repo));
 
   console.log(`\nPreflight fleet scan — ${scans.length} manifest(s) across ${new Set(scans.map((s) => s.repo)).size} repo(s)\n`);
   if (risky.length === 0) {
@@ -125,7 +160,8 @@ async function main(): Promise<void> {
       for (const h of highlights(s)) console.log(h);
     }
   }
-  if (clean.length) console.log(`\nClean (${clean.length}): ${clean.map((s) => s.repo).join(', ')}`);
+  const cleanRepos = [...new Set(scans.map((s) => s.repo))].filter((r) => !riskyRepos.has(r));
+  if (cleanRepos.length) console.log(`\nClean (${cleanRepos.length}): ${cleanRepos.join(', ')}`);
 
   const totals = scans.reduce(
     (a, s) => ({ malware: a.malware + s.report.summary.malware, cve: a.cve + s.report.summary.cve }),
