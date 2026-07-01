@@ -6,6 +6,18 @@ import type { Dependency, Ecosystem, Severity, Vuln } from './types';
 // https://google.github.io/osv.dev/api/ and the OSV schema (https://ossf.github.io/osv-schema/).
 const OSV = 'https://api.osv.dev';
 
+// OSV's `querybatch` rejects very large batches with a 400 (an undocumented ~1000-query practical
+// cap — a 1177-dep repo trips it), so we split into chunks of this size. Keeping it at 1000 means a
+// manifest with ≤1000 deps is a single chunk with the same cache key as before (no cache churn).
+const OSV_BATCH = 1000;
+
+/** Split an array into consecutive groups of at most `size` (order preserved). */
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 interface OsvDetail {
   id: string;
   summary?: string;
@@ -39,7 +51,8 @@ function severityOf(v: OsvDetail): Severity {
 
 /**
  * Look up known vulnerabilities for the given (versioned) deps.
- * One `querybatch` POST for presence, then fetch details for the distinct vuln ids.
+ * Chunked `querybatch` POST(s) for presence (OSV 400s on very large batches), then fetch details
+ * for the distinct vuln ids.
  * Returns a map keyed by `name@version` — a package can appear at several versions across the
  * dependency graph, so the name alone isn't unique. Deps without a resolved version are skipped.
  */
@@ -53,17 +66,25 @@ export async function fetchVulns(
   const list = [...items.values()];
   if (list.length === 0) return out;
 
-  const queries = list.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
-  const results = await cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
-    const res = await fetch(`${OSV}/v1/querybatch`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ queries }),
-    });
-    if (!res.ok) throw new Error(`OSV querybatch failed: ${res.status}`);
-    const data = (await res.json()) as { results?: { vulns?: { id: string }[] }[] };
-    return data.results ?? [];
-  });
+  // One querybatch per ≤1000-query chunk; Promise.all preserves chunk order and `.flat()`
+  // concatenates in order, so `results[i]` still aligns with `list[i]`.
+  const results = (
+    await Promise.all(
+      chunk(list, OSV_BATCH).map((group) => {
+        const queries = group.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
+        return cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
+          const res = await fetch(`${OSV}/v1/querybatch`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ queries }),
+          });
+          if (!res.ok) throw new Error(`OSV querybatch failed: ${res.status}`);
+          const data = (await res.json()) as { results?: { vulns?: { id: string }[] }[] };
+          return data.results ?? [];
+        });
+      }),
+    )
+  ).flat();
 
   const idsByItem = list
     .map((it, i) => ({ it, ids: (results[i]?.vulns ?? []).map((v) => v.id) }))
