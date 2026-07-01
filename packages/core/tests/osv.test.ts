@@ -18,6 +18,7 @@ const VULNS: Record<string, unknown> = {
     severity: [{ type: 'CVSS_V3', score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
   },
   'MAL-evil': { id: 'MAL-evil', summary: 'malicious package' },
+  'GHSA-chunk': { id: 'GHSA-chunk', summary: 'chunk boundary', database_specific: { severity: 'HIGH' } },
 };
 
 beforeEach(() => {
@@ -31,6 +32,7 @@ beforeEach(() => {
           if (q.package.name === 'js-yaml') return { vulns: [{ id: 'GHSA-yaml' }] };
           if (q.package.name === 'foo') return { vulns: [{ id: 'CVE-foo' }] };
           if (q.package.name === 'evil') return { vulns: [{ id: 'MAL-evil' }] };
+          if (q.package.name.startsWith('vuln-')) return { vulns: [{ id: 'GHSA-chunk' }] };
           return {};
         });
         return new Response(JSON.stringify({ results }), { status: 200 });
@@ -75,5 +77,29 @@ describe('fetchVulns', () => {
     expect([...map.keys()].some((k) => k.startsWith('no-version'))).toBe(false);
     const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string;
     expect(body).not.toContain('no-version'); // filtered before the batch query
+  });
+
+  it('splits >1000 queries into chunks and keeps results aligned by name@version', async () => {
+    // 1001 unique deps → two querybatch calls; a vuln sits in each chunk (index 0 and index 1000).
+    const many: Dependency[] = [
+      { name: 'vuln-early', range: '1.0.0', version: '1.0.0', dev: false },
+      ...Array.from({ length: 999 }, (_, i) => ({
+        name: `filler-${i}`,
+        range: '1.0.0',
+        version: '1.0.0',
+        dev: false,
+      })),
+      { name: 'vuln-late', range: '1.0.0', version: '1.0.0', dev: false },
+    ];
+    expect(many).toHaveLength(1001);
+
+    const map = await fetchVulns(many, 'npm');
+    expect(map.get('vuln-early@1.0.0')?.[0].id).toBe('GHSA-chunk'); // first chunk
+    expect(map.get('vuln-late@1.0.0')?.[0].id).toBe('GHSA-chunk'); // second chunk
+
+    const batchCalls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+      (c[0] as string).endsWith('/v1/querybatch'),
+    );
+    expect(batchCalls).toHaveLength(2);
   });
 });
