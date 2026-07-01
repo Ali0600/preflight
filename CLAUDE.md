@@ -9,12 +9,15 @@ knowing which packages a framework pins as a coordinated set, so the tool can sa
 auto-bump this — use `npx expo install`."
 
 ## Status
-Stage 1 (CLI) is **complete**: manifest → OSV vulns (+ CVSS-derived severity) + lockstep → verdict
-→ table, with a 24h disk cache, `--latest` (latest version + `stale` verdict), `--health` (deps.dev
-Scorecard), and a `tsup` build to a standalone `dist`. Stages 2 (GitHub Action) and 3 (web dashboard)
-are speced in `docs/`. **Stages 2 (Action) and 3 (web dashboard) are now built**; the dashboard's
-repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs/roadmap.md),
-[docs/spec.md](docs/spec.md).
+All three surfaces (CLI, Action, web dashboard) are **built and on `main`**, plus: v0.2 depth
+(whole-lockfile transitive, EPSS+KEV, malicious-package, CycloneDX SBOM, SARIF, scheduled repo scan)
+and v0.3 security (install-script, offline typosquat, license risk, per-check Scorecard, and a
+shared `preflight.config.json` **policy gate**). The web app is **deployed on Vercel** at
+`https://preflight-web.vercel.app` (auto-deploys on push to `main`) exposing keyless `POST /api/scan`
+(+ `/api/health`) for embedding — see `docs/integration.md`. `scripts/fleet-scan.mts`
+(`npm run scan:repos`) sweeps all `gh` repos (root + one level down). **Deferred:** the
+ai-project-dashboard *consumer* side (build it in a session rooted in that repo), npm publish, and
+GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md](docs/spec.md).
 
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
@@ -42,9 +45,11 @@ repo-OAuth connect is the only deferred piece. Full plan: [docs/roadmap.md](docs
   from source). Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml`
   (tag → `npm publish @preflight/cli --provenance`).
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
-  `/api/analyze` route (Node runtime, `setCacheEnabled(false)`) → `analyzeContent()` → metric cards +
-  findings, matching `docs/dashboard-mockup.html`. Engine pulled in via `transpilePackages`; excluded
-  from root eslint/tsc (it self-checks via `next build`). Repo-OAuth connect is deferred.
+  `/api/analyze` (`analyzeContent()`) → metric cards + findings, matching `docs/dashboard-mockup.html`.
+  Also `POST /api/scan` (`analyzeFiles()`, keyless — caller posts manifest+lockfile, `maxDuration=60`
+  for Vercel) and `GET /api/health` for **embedding** (docs/integration.md). Engine via
+  `transpilePackages`; excluded from root eslint/tsc (self-checks via `next build`); `output:standalone`
+  + `Dockerfile` for self-host. **Deployed on Vercel** (preflight-web.vercel.app). Repo-OAuth deferred.
 
 ## Commands
 - Install: `npm install`

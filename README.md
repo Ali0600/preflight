@@ -35,7 +35,9 @@ per-package updater break your build.
    CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
 3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest → metric cards +
    findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html), dark-mode aware.
-   **Working today** (`npm run dev -w @preflight/web`); GitHub-repo OAuth is deferred, Vercel-ready.
+   **Live at [preflight-web.vercel.app](https://preflight-web.vercel.app)**. Also exposes a keyless
+   `POST /api/scan` (send a manifest + lockfile → full report) so other apps can embed it —
+   see [docs/integration.md](docs/integration.md). GitHub-repo OAuth is deferred.
 
 ## Quickstart
 ```bash
