@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "check": "tsx packages/cli/src/index.ts check",
+    "plan": "tsx packages/cli/src/index.ts plan",
     "scan:repos": "tsx scripts/fleet-scan.mts",
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",

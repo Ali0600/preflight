@@ -21,6 +21,8 @@ import {
 import { Command } from 'commander';
 import pc from 'picocolors';
 
+import { registerPlanCommand } from './plan';
+
 const BADGE: Record<Verdict, (s: string) => string> = {
   malware: (s) => pc.bgRed(pc.white(pc.bold(` ${s} `))),
   cve: (s) => pc.bgRed(pc.white(` ${s} `)),
@@ -244,5 +246,7 @@ program
       }
     },
   );
+
+registerPlanCommand(program);
 
 await program.parseAsync();
