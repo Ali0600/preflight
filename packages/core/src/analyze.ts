@@ -8,8 +8,20 @@ import { fetchKev } from './kev';
 import { lockstepFor } from './lockstep';
 import { parseManifest, parseManifestContent } from './manifest';
 import { fetchRegistryAll } from './registry';
+import { computeRuntimeCompat } from './runtime-compat';
+import { fetchRuntimeMetaAll } from './runtimes';
 import { typosquatOf } from './typosquat';
-import type { Dependency, Ecosystem, Finding, Manifest, Report, Verdict, Vuln } from './types';
+import type {
+  Dependency,
+  Ecosystem,
+  Finding,
+  Manifest,
+  Report,
+  RuntimeName,
+  RuntimeTarget,
+  Verdict,
+  Vuln,
+} from './types';
 import { fetchVulns } from './osv';
 import { decideVerdict } from './verdict';
 
@@ -18,6 +30,9 @@ export interface AnalyzeOptions {
   latest?: boolean;
   /** Fetch each dep's OpenSSF Scorecard from deps.dev (extra 2-hop calls). */
   health?: boolean;
+  /** Target runtimes to check installability against (enables the `incompatible` verdict).
+   * The manifest's ecosystem picks which one applies: npm -> node, PyPI -> python. */
+  runtimes?: Partial<Record<RuntimeName, RuntimeTarget>>;
 }
 
 /** Analyze a manifest file on disk (CLI / Action) — resolves npm lockfile versions. */
@@ -69,10 +84,15 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
 
-  const [vulnMap, registryMap, healthMap] = await Promise.all([
+  // Runtime installability only applies to deps you version yourself (direct), against
+  // the runtime matching this manifest's ecosystem.
+  const runtimeTarget = opts.runtimes?.[ecosystem === 'npm' ? 'node' : 'python'];
+
+  const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
     opts.health ? fetchHealthAll(directDeps, ecosystem) : undefined,
+    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem) : undefined,
   ]);
   await enrichExploitability(vulnMap); // EPSS + KEV — only fires when CVEs were found
 
@@ -80,6 +100,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     const info = registryMap?.get(d.name);
     const health = healthMap?.get(d.name);
     const direct = d.direct !== false;
+    const runtimeMeta = direct && runtimeTarget ? runtimeMap?.get(d.name) : undefined;
     const base = {
       name: d.name,
       range: d.range,
@@ -96,15 +117,32 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       installScript: d.installScript,
       // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
       suspiciousName: direct ? typosquatHit(d.name, ecosystem) : undefined,
+      runtimeCompat: runtimeMeta
+        ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget!, ecosystem)
+        : undefined,
     };
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
   });
 
-  const summary: Record<Verdict, number> = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
+  const summary: Record<Verdict, number> = {
+    malware: 0,
+    cve: 0,
+    incompatible: 0,
+    pinned: 0,
+    stale: 0,
+    safe: 0,
+  };
   for (const f of findings) summary[f.verdict] += 1;
 
-  return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
+  return {
+    ecosystem,
+    path: manifest.path,
+    total: findings.length,
+    findings,
+    summary,
+    runtimeTarget,
+  };
 }
 
 /** Attach EPSS (exploit probability) + CISA KEV (confirmed-exploited) to each found advisory.

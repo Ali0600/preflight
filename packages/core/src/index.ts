@@ -16,9 +16,10 @@ export {
   type Policy,
   type Violation,
 } from './policy';
-export { decideVerdict } from './verdict';
+export { decideVerdict, runtimeLabel } from './verdict';
 export { fetchRuntimeMeta, fetchRuntimeMetaAll, type RuntimeMeta } from './runtimes';
 export { computeRuntimeCompat } from './runtime-compat';
+export { detectRuntimes } from './runtime-detect';
 export {
   compareSemver,
   parseSemver,

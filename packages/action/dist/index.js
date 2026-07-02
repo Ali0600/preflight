@@ -1198,8 +1198,8 @@ var require_util = __commonJS({
       };
     }
     async function* convertIterableToBuffer(iterable) {
-      for await (const chunk of iterable) {
-        yield Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      for await (const chunk2 of iterable) {
+        yield Buffer.isBuffer(chunk2) ? chunk2 : Buffer.from(chunk2);
       }
     }
     var ReadableStream;
@@ -1439,15 +1439,15 @@ var require_sbmh = __commonJS({
       this.matches = 0;
       this._bufpos = 0;
     };
-    SBMH.prototype.push = function(chunk, pos) {
-      if (!Buffer.isBuffer(chunk)) {
-        chunk = Buffer.from(chunk, "binary");
+    SBMH.prototype.push = function(chunk2, pos) {
+      if (!Buffer.isBuffer(chunk2)) {
+        chunk2 = Buffer.from(chunk2, "binary");
       }
-      const chlen = chunk.length;
+      const chlen = chunk2.length;
       this._bufpos = pos || 0;
       let r;
       while (r !== chlen && this.matches < this.maxMatches) {
-        r = this._sbmh_feed(chunk);
+        r = this._sbmh_feed(chunk2);
       }
       return r;
     };
@@ -2885,8 +2885,8 @@ var require_multipart = __commonJS({
         checkFinished();
       });
     }
-    Multipart.prototype.write = function(chunk, cb) {
-      const r = this.parser.write(chunk);
+    Multipart.prototype.write = function(chunk2, cb) {
+      const r = this.parser.write(chunk2);
       if (r && !this._pause) {
         cb();
       } else {
@@ -3383,8 +3383,8 @@ var require_main = __commonJS({
       }
       throw new Error("Unsupported Content-Type.");
     };
-    Busboy.prototype._write = function(chunk, encoding, cb) {
-      this._parser.write(chunk, cb);
+    Busboy.prototype._write = function(chunk2, encoding, cb) {
+      this._parser.write(chunk2, cb);
     };
     module2.exports = Busboy;
     module2.exports.default = Busboy;
@@ -4165,15 +4165,15 @@ var require_util2 = __commonJS({
       const bytes = [];
       let byteLength = 0;
       while (true) {
-        const { done, value: chunk } = await reader.read();
+        const { done, value: chunk2 } = await reader.read();
         if (done) {
           return Buffer.concat(bytes, byteLength);
         }
-        if (!isUint8Array(chunk)) {
+        if (!isUint8Array(chunk2)) {
           throw new TypeError("Received non-Uint8Array chunk");
         }
-        bytes.push(chunk);
-        byteLength += chunk.length;
+        bytes.push(chunk2);
+        byteLength += chunk2.length;
       }
     }
     function urlIsLocal(url) {
@@ -5340,28 +5340,28 @@ Content-Disposition: form-data`;
         let hasUnknownSizeValue = false;
         for (const [name, value] of object) {
           if (typeof value === "string") {
-            const chunk2 = textEncoder.encode(prefix + `; name="${escape(normalizeLinefeeds(name))}"\r
+            const chunk3 = textEncoder.encode(prefix + `; name="${escape(normalizeLinefeeds(name))}"\r
 \r
 ${normalizeLinefeeds(value)}\r
 `);
-            blobParts.push(chunk2);
-            length += chunk2.byteLength;
+            blobParts.push(chunk3);
+            length += chunk3.byteLength;
           } else {
-            const chunk2 = textEncoder.encode(`${prefix}; name="${escape(normalizeLinefeeds(name))}"` + (value.name ? `; filename="${escape(value.name)}"` : "") + `\r
+            const chunk3 = textEncoder.encode(`${prefix}; name="${escape(normalizeLinefeeds(name))}"` + (value.name ? `; filename="${escape(value.name)}"` : "") + `\r
 Content-Type: ${value.type || "application/octet-stream"}\r
 \r
 `);
-            blobParts.push(chunk2, value, rn);
+            blobParts.push(chunk3, value, rn);
             if (typeof value.size === "number") {
-              length += chunk2.byteLength + value.size + rn.byteLength;
+              length += chunk3.byteLength + value.size + rn.byteLength;
             } else {
               hasUnknownSizeValue = true;
             }
           }
         }
-        const chunk = textEncoder.encode(`--${boundary}--`);
-        blobParts.push(chunk);
-        length += chunk.byteLength;
+        const chunk2 = textEncoder.encode(`--${boundary}--`);
+        blobParts.push(chunk2);
+        length += chunk2.byteLength;
         if (hasUnknownSizeValue) {
           length = null;
         }
@@ -5515,8 +5515,8 @@ Content-Type: ${value.type || "application/octet-stream"}\r
               const chunks = [];
               if (encoding === "base64" || encoding.toLowerCase() === "base64") {
                 let base64chunk = "";
-                value.on("data", (chunk) => {
-                  base64chunk += chunk.toString().replace(/[\r\n]/gm, "");
+                value.on("data", (chunk2) => {
+                  base64chunk += chunk2.toString().replace(/[\r\n]/gm, "");
                   const end = base64chunk.length - base64chunk.length % 4;
                   chunks.push(Buffer.from(base64chunk.slice(0, end), "base64"));
                   base64chunk = base64chunk.slice(end);
@@ -5526,8 +5526,8 @@ Content-Type: ${value.type || "application/octet-stream"}\r
                   responseFormData.append(name, new File(chunks, filename, { type: mimeType }));
                 });
               } else {
-                value.on("data", (chunk) => {
-                  chunks.push(chunk);
+                value.on("data", (chunk2) => {
+                  chunks.push(chunk2);
                 });
                 value.on("end", () => {
                   responseFormData.append(name, new File(chunks, filename, { type: mimeType }));
@@ -5538,7 +5538,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r
               busboy.on("finish", resolve);
               busboy.on("error", (err) => reject(new TypeError(err)));
             });
-            if (this.body !== null) for await (const chunk of consumeBody(this[kState].body)) busboy.write(chunk);
+            if (this.body !== null) for await (const chunk2 of consumeBody(this[kState].body)) busboy.write(chunk2);
             busboy.end();
             await busboyResolve;
             return responseFormData;
@@ -5547,11 +5547,11 @@ Content-Type: ${value.type || "application/octet-stream"}\r
             try {
               let text = "";
               const streamingDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
-              for await (const chunk of consumeBody(this[kState].body)) {
-                if (!isUint8Array(chunk)) {
+              for await (const chunk2 of consumeBody(this[kState].body)) {
+                if (!isUint8Array(chunk2)) {
                   throw new TypeError("Expected Uint8Array chunk");
                 }
-                text += streamingDecoder.decode(chunk, { stream: true });
+                text += streamingDecoder.decode(chunk2, { stream: true });
               }
               text += streamingDecoder.decode();
               entries = new URLSearchParams(text);
@@ -5800,10 +5800,10 @@ var require_request = __commonJS({
           channels.create.publish({ request: this });
         }
       }
-      onBodySent(chunk) {
+      onBodySent(chunk2) {
         if (this[kHandler].onBodySent) {
           try {
-            return this[kHandler].onBodySent(chunk);
+            return this[kHandler].onBodySent(chunk2);
           } catch (err) {
             this.abort(err);
           }
@@ -5843,11 +5843,11 @@ var require_request = __commonJS({
           this.abort(err);
         }
       }
-      onData(chunk) {
+      onData(chunk2) {
         assert(!this.aborted);
         assert(!this.completed);
         try {
-          return this[kHandler].onData(chunk);
+          return this[kHandler].onData(chunk2);
         } catch (err) {
           this.abort(err);
           return false;
@@ -6766,10 +6766,10 @@ var require_RedirectHandler = __commonJS({
           this.opts.body = null;
         }
       }
-      onData(chunk) {
+      onData(chunk2) {
         if (this.location) {
         } else {
-          return this.handler.onData(chunk);
+          return this.handler.onData(chunk2);
         }
       }
       onComplete(trailers) {
@@ -6781,9 +6781,9 @@ var require_RedirectHandler = __commonJS({
           this.handler.onComplete(trailers);
         }
       }
-      onBodySent(chunk) {
+      onBodySent(chunk2) {
         if (this.handler.onBodySent) {
-          this.handler.onBodySent(chunk);
+          this.handler.onBodySent(chunk2);
         }
       }
     };
@@ -7381,11 +7381,11 @@ var require_client = __commonJS({
       }
       readMore() {
         while (!this.paused && this.ptr) {
-          const chunk = this.socket.read();
-          if (chunk === null) {
+          const chunk2 = this.socket.read();
+          if (chunk2 === null) {
             break;
           }
-          this.execute(chunk);
+          this.execute(chunk2);
         }
       }
       execute(data) {
@@ -8202,8 +8202,8 @@ upgrade: ${upgrade}\r
       stream.once("end", () => {
         request2.onComplete([]);
       });
-      stream.on("data", (chunk) => {
-        if (request2.onData(chunk) === false) {
+      stream.on("data", (chunk2) => {
+        if (request2.onData(chunk2) === false) {
           stream.pause();
         }
       });
@@ -8293,8 +8293,8 @@ upgrade: ${upgrade}\r
     function writeStream({ h2stream, body, client, request: request2, socket, contentLength, header, expectsPayload }) {
       assert(contentLength !== 0 || client[kRunning] === 0, "stream body cannot be pipelined");
       if (client[kHTTPConnVersion] === "h2") {
-        let onPipeData = function(chunk) {
-          request2.onBodySent(chunk);
+        let onPipeData = function(chunk2) {
+          request2.onBodySent(chunk2);
         };
         const pipe = pipeline(
           body,
@@ -8317,12 +8317,12 @@ upgrade: ${upgrade}\r
       }
       let finished = false;
       const writer = new AsyncWriter({ socket, request: request2, contentLength, client, expectsPayload, header });
-      const onData = function(chunk) {
+      const onData = function(chunk2) {
         if (finished) {
           return;
         }
         try {
-          if (!writer.write(chunk) && this.pause) {
+          if (!writer.write(chunk2) && this.pause) {
             this.pause();
           }
         } catch (err) {
@@ -8423,12 +8423,12 @@ upgrade: ${upgrade}\r
       if (client[kHTTPConnVersion] === "h2") {
         h2stream.on("close", onDrain).on("drain", onDrain);
         try {
-          for await (const chunk of body) {
+          for await (const chunk2 of body) {
             if (socket[kError]) {
               throw socket[kError];
             }
-            const res = h2stream.write(chunk);
-            request2.onBodySent(chunk);
+            const res = h2stream.write(chunk2);
+            request2.onBodySent(chunk2);
             if (!res) {
               await waitForDrain();
             }
@@ -8445,11 +8445,11 @@ upgrade: ${upgrade}\r
       socket.on("close", onDrain).on("drain", onDrain);
       const writer = new AsyncWriter({ socket, request: request2, contentLength, client, expectsPayload, header });
       try {
-        for await (const chunk of body) {
+        for await (const chunk2 of body) {
           if (socket[kError]) {
             throw socket[kError];
           }
-          if (!writer.write(chunk)) {
+          if (!writer.write(chunk2)) {
             await waitForDrain();
           }
         }
@@ -8471,7 +8471,7 @@ upgrade: ${upgrade}\r
         this.header = header;
         socket[kWriting] = true;
       }
-      write(chunk) {
+      write(chunk2) {
         const { socket, request: request2, contentLength, client, bytesWritten, expectsPayload, header } = this;
         if (socket[kError]) {
           throw socket[kError];
@@ -8479,7 +8479,7 @@ upgrade: ${upgrade}\r
         if (socket.destroyed) {
           return false;
         }
-        const len = Buffer.byteLength(chunk);
+        const len = Buffer.byteLength(chunk2);
         if (!len) {
           return true;
         }
@@ -8509,9 +8509,9 @@ ${len.toString(16)}\r
 `, "latin1");
         }
         this.bytesWritten += len;
-        const ret = socket.write(chunk);
+        const ret = socket.write(chunk2);
         socket.uncork();
-        request2.onBodySent(chunk);
+        request2.onBodySent(chunk2);
         if (!ret) {
           if (socket[kParser].timeout && socket[kParser].timeoutType === TIMEOUT_HEADERS) {
             if (socket[kParser].timeout.refresh) {
@@ -9284,12 +9284,12 @@ var require_readable = __commonJS({
       removeListener(ev, ...args) {
         return this.off(ev, ...args);
       }
-      push(chunk) {
-        if (this[kConsume] && chunk !== null && this.readableLength === 0) {
-          consumePush(this[kConsume], chunk);
-          return this[kReading] ? super.push(chunk) : true;
+      push(chunk2) {
+        if (this[kConsume] && chunk2 !== null && this.readableLength === 0) {
+          consumePush(this[kConsume], chunk2);
+          return this[kReading] ? super.push(chunk2) : true;
         }
-        return super.push(chunk);
+        return super.push(chunk2);
       }
       // https://fetch.spec.whatwg.org/#dom-body-text
       async text() {
@@ -9353,8 +9353,8 @@ var require_readable = __commonJS({
             } else {
               resolve(null);
             }
-          }).on("error", noop2).on("data", function(chunk) {
-            limit -= chunk.length;
+          }).on("error", noop2).on("data", function(chunk2) {
+            limit -= chunk2.length;
             if (limit <= 0) {
               this.destroy();
             }
@@ -9397,8 +9397,8 @@ var require_readable = __commonJS({
         return;
       }
       const { _readableState: state } = consume2.stream;
-      for (const chunk of state.buffer) {
-        consumePush(consume2, chunk);
+      for (const chunk2 of state.buffer) {
+        consumePush(consume2, chunk2);
       }
       if (state.endEmitted) {
         consumeEnd(this[kConsume]);
@@ -9437,9 +9437,9 @@ var require_readable = __commonJS({
         stream.destroy(err);
       }
     }
-    function consumePush(consume2, chunk) {
-      consume2.length += chunk.length;
-      consume2.body.push(chunk);
+    function consumePush(consume2, chunk2) {
+      consume2.length += chunk2.length;
+      consume2.body.push(chunk2);
     }
     function consumeFinish(consume2, err) {
       if (consume2.body === null) {
@@ -9473,9 +9473,9 @@ var require_util3 = __commonJS({
       assert(body);
       let chunks = [];
       let limit = 0;
-      for await (const chunk of body) {
-        chunks.push(chunk);
-        limit += chunk.length;
+      for await (const chunk2 of body) {
+        chunks.push(chunk2);
+        limit += chunk2.length;
         if (limit > 128 * 1024) {
           chunks = null;
           break;
@@ -9654,9 +9654,9 @@ var require_api_request = __commonJS({
           }
         }
       }
-      onData(chunk) {
+      onData(chunk2) {
         const { res } = this;
-        return res.push(chunk);
+        return res.push(chunk2);
       }
       onComplete(trailers) {
         const { res } = this;
@@ -9828,9 +9828,9 @@ var require_api_stream = __commonJS({
         const needDrain = res.writableNeedDrain !== void 0 ? res.writableNeedDrain : res._writableState && res._writableState.needDrain;
         return needDrain !== true;
       }
-      onData(chunk) {
+      onData(chunk2) {
         const { res } = this;
-        return res ? res.write(chunk) : true;
+        return res ? res.write(chunk2) : true;
       }
       onComplete(trailers) {
         const { res } = this;
@@ -9968,9 +9968,9 @@ var require_api_pipeline = __commonJS({
               body.resume();
             }
           },
-          write: (chunk, encoding, callback) => {
+          write: (chunk2, encoding, callback) => {
             const { req } = this;
-            if (req.push(chunk, encoding) || req._readableState.destroyed) {
+            if (req.push(chunk2, encoding) || req._readableState.destroyed) {
               callback();
             } else {
               req[kResume] = callback;
@@ -10034,9 +10034,9 @@ var require_api_pipeline = __commonJS({
         if (!body || typeof body.on !== "function") {
           throw new InvalidReturnValueError("expected Readable");
         }
-        body.on("data", (chunk) => {
+        body.on("data", (chunk2) => {
           const { ret, body: body2 } = this;
-          if (!ret.push(chunk) && body2.pause) {
+          if (!ret.push(chunk2) && body2.pause) {
             body2.pause();
           }
         }).on("error", (err) => {
@@ -10053,9 +10053,9 @@ var require_api_pipeline = __commonJS({
         });
         this.body = body;
       }
-      onData(chunk) {
+      onData(chunk2) {
         const { res } = this;
-        return res.push(chunk);
+        return res.push(chunk2);
       }
       onComplete(trailers) {
         const { res } = this;
@@ -10904,8 +10904,8 @@ var require_pending_interceptors_formatter = __commonJS({
     module2.exports = class PendingInterceptorsFormatter {
       constructor({ disableColors } = {}) {
         this.transform = new Transform({
-          transform(chunk, _enc, cb) {
-            cb(null, chunk);
+          transform(chunk2, _enc, cb) {
+            cb(null, chunk2);
           }
         });
         this.logger = new Console({
@@ -11315,8 +11315,8 @@ var require_RetryHandler = __commonJS({
           this.abort = abort;
         }
       }
-      onBodySent(chunk) {
-        if (this.handler.onBodySent) return this.handler.onBodySent(chunk);
+      onBodySent(chunk2) {
+        if (this.handler.onBodySent) return this.handler.onBodySent(chunk2);
       }
       static [kRetryHandlerDefaultRetry](err, { state, opts }, cb) {
         const { statusCode, code, headers } = err;
@@ -11448,9 +11448,9 @@ var require_RetryHandler = __commonJS({
         this.abort(err);
         return false;
       }
-      onData(chunk) {
-        this.start += chunk.length;
-        return this.handler.onData(chunk);
+      onData(chunk2) {
+        this.start += chunk2.length;
+        return this.handler.onData(chunk2);
       }
       onComplete(rawTrailers) {
         this.retryCount = 0;
@@ -13440,8 +13440,8 @@ var require_fetch = __commonJS({
       if (response.body == null) {
         processResponseEndOfBody();
       } else {
-        const identityTransformAlgorithm = (chunk, controller) => {
-          controller.enqueue(chunk);
+        const identityTransformAlgorithm = (chunk2, controller) => {
+          controller.enqueue(chunk2);
         };
         const transformStream = new TransformStream({
           start() {
@@ -13947,11 +13947,11 @@ var require_fetch = __commonJS({
               });
               return true;
             },
-            onData(chunk) {
+            onData(chunk2) {
               if (fetchParams.controller.dump) {
                 return;
               }
-              const bytes = chunk;
+              const bytes = chunk2;
               timingInfo.encodedBodySize += bytes.byteLength;
               return this.body.push(bytes);
             },
@@ -14478,8 +14478,8 @@ var require_util4 = __commonJS({
           }
           dataURL += ";base64,";
           const decoder = new StringDecoder("latin1");
-          for (const chunk of bytes) {
-            dataURL += btoa(decoder.write(chunk));
+          for (const chunk2 of bytes) {
+            dataURL += btoa(decoder.write(chunk2));
           }
           dataURL += btoa(decoder.end());
           return dataURL;
@@ -14507,8 +14507,8 @@ var require_util4 = __commonJS({
         case "BinaryString": {
           let binaryString = "";
           const decoder = new StringDecoder("latin1");
-          for (const chunk of bytes) {
-            binaryString += decoder.write(chunk);
+          for (const chunk2 of bytes) {
+            binaryString += decoder.write(chunk2);
           }
           binaryString += decoder.end();
           return binaryString;
@@ -16419,8 +16419,8 @@ var require_connection = __commonJS({
       });
       return controller;
     }
-    function onSocketData(chunk) {
-      if (!this.ws[kByteParser].write(chunk)) {
+    function onSocketData(chunk2) {
+      if (!this.ws[kByteParser].write(chunk2)) {
         this.pause();
       }
     }
@@ -16548,9 +16548,9 @@ var require_receiver = __commonJS({
        * @param {Buffer} chunk
        * @param {() => void} callback
        */
-      _write(chunk, _, callback) {
-        this.#buffers.push(chunk);
-        this.#byteOffset += chunk.length;
+      _write(chunk2, _, callback) {
+        this.#buffers.push(chunk2);
+        this.#byteOffset += chunk2.length;
         this.run(callback);
       }
       /**
@@ -17442,8 +17442,8 @@ var require_lib = __commonJS({
         return __awaiter(this, void 0, void 0, function* () {
           return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
-            this.message.on("data", (chunk) => {
-              output = Buffer.concat([output, chunk]);
+            this.message.on("data", (chunk2) => {
+              output = Buffer.concat([output, chunk2]);
             });
             this.message.on("end", () => {
               resolve(output.toString());
@@ -17455,8 +17455,8 @@ var require_lib = __commonJS({
         return __awaiter(this, void 0, void 0, function* () {
           return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
             const chunks = [];
-            this.message.on("data", (chunk) => {
-              chunks.push(chunk);
+            this.message.on("data", (chunk2) => {
+              chunks.push(chunk2);
             });
             this.message.on("end", () => {
               resolve(Buffer.concat(chunks));
@@ -23936,8 +23936,8 @@ var require_github = __commonJS({
 });
 
 // src/index.ts
-var import_node_fs5 = require("fs");
-var import_node_path4 = require("path");
+var import_node_fs6 = require("fs");
+var import_node_path5 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
 
@@ -24092,6 +24092,12 @@ function cvssV3Severity(vector) {
 
 // ../core/src/osv.ts
 var OSV = "https://api.osv.dev";
+var OSV_BATCH = 1e3;
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 var GHSA_SEVERITY = {
   low: "low",
   moderate: "medium",
@@ -24114,17 +24120,21 @@ async function fetchVulns(deps, ecosystem) {
   for (const d of deps) if (d.version) items.set(`${d.name}@${d.version}`, { name: d.name, version: d.version });
   const list = [...items.values()];
   if (list.length === 0) return out;
-  const queries = list.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
-  const results = await cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
-    const res = await fetch(`${OSV}/v1/querybatch`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ queries })
-    });
-    if (!res.ok) throw new Error(`OSV querybatch failed: ${res.status}`);
-    const data = await res.json();
-    return data.results ?? [];
-  });
+  const results = (await Promise.all(
+    chunk(list, OSV_BATCH).map((group) => {
+      const queries = group.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
+      return cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
+        const res = await fetch(`${OSV}/v1/querybatch`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ queries })
+        });
+        if (!res.ok) throw new Error(`OSV querybatch failed: ${res.status}`);
+        const data = await res.json();
+        return data.results ?? [];
+      });
+    })
+  )).flat();
   const idsByItem = list.map((it, i) => ({ it, ids: (results[i]?.vulns ?? []).map((v) => v.id) })).filter((x) => x.ids.length > 0);
   const uniqueIds = [...new Set(idsByItem.flatMap((x) => x.ids))];
   const details = /* @__PURE__ */ new Map();
@@ -24245,10 +24255,10 @@ async function fetchEpss(cveIds) {
   const out = /* @__PURE__ */ new Map();
   const ids = [...new Set(cveIds.filter((id) => id.startsWith("CVE-")))];
   for (let i = 0; i < ids.length; i += 100) {
-    const chunk = ids.slice(i, i + 100);
-    const rows = await cached(`epss:${chunk.join(",")}`, async () => {
+    const chunk2 = ids.slice(i, i + 100);
+    const rows = await cached(`epss:${chunk2.join(",")}`, async () => {
       try {
-        const r = await fetch(`${EPSS}?cve=${chunk.join(",")}`);
+        const r = await fetch(`${EPSS}?cve=${chunk2.join(",")}`);
         if (!r.ok) return [];
         const j = await r.json();
         return j.data ?? [];
@@ -24503,6 +24513,86 @@ function lockstepFor(name) {
 
 // ../core/src/policy.ts
 var import_node_fs3 = require("fs");
+
+// ../core/src/verdict.ts
+var RANK = { unknown: 0, low: 1, medium: 2, high: 3, critical: 4 };
+var STALE_AGE_MS = 365 * 24 * 60 * 60 * 1e3;
+function worst(vulns) {
+  return vulns.reduce((acc, v) => RANK[v.severity] > RANK[acc] ? v.severity : acc, "unknown");
+}
+function exploitTail(vulns) {
+  if (vulns.some((v) => v.kev)) return " \xB7 actively exploited (KEV)";
+  const maxEpss = Math.max(0, ...vulns.map((v) => v.epss ?? 0));
+  return maxEpss >= 0.1 ? ` \xB7 EPSS ${maxEpss.toFixed(2)}` : "";
+}
+function majorOf(spec) {
+  const m = spec?.match(/\d+/);
+  return m ? Number(m[0]) : void 0;
+}
+function yearsSince(iso) {
+  return (Date.now() - new Date(iso).getTime()) / (365 * 24 * 60 * 60 * 1e3);
+}
+function runtimeLabel(t, withSource = false) {
+  const name = t.runtime === "node" ? "Node" : "Python";
+  const src = withSource && !t.explicit ? ` (${t.source})` : "";
+  return `${name} ${t.version}${src}`;
+}
+function constraintPhrase(rc) {
+  if (!rc.firstIncompatible || !rc.constraint) return "";
+  const verb = rc.target.runtime === "python" ? "requires Python" : "declares engines node";
+  return ` (${rc.firstIncompatible}+ ${verb} ${rc.constraint})`;
+}
+function incompatibleReason(f, rc) {
+  const max = rc.maxCompatible ? ` \u2014 max compatible ${rc.maxCompatible}` : "";
+  const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
+  if (rc.rangeUnsatisfiable) {
+    return `No version in "${f.range}" installs on ${runtimeLabel(rc.target, true)}${constraintPhrase(rc)}${max}${tail}`;
+  }
+  return `Locked ${f.version} does not install on ${runtimeLabel(rc.target, true)}${constraintPhrase(rc)}${max}${tail}`;
+}
+function isStale(f) {
+  if (!f.latest || !f.lastPublish) return false;
+  const current = majorOf(f.version ?? f.range);
+  const latest = majorOf(f.latest);
+  if (current === void 0 || latest === void 0 || latest <= current) return false;
+  const published = new Date(f.lastPublish).getTime();
+  return Number.isFinite(published) && Date.now() - published > STALE_AGE_MS;
+}
+function decideVerdict(f) {
+  if (f.vulns.some((v) => v.malicious)) {
+    return {
+      verdict: "malware",
+      reason: "Known-malicious package (OSV MAL advisory) \u2014 remove immediately"
+    };
+  }
+  if (f.vulns.length > 0) {
+    const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
+    return {
+      verdict: "cve",
+      reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`
+    };
+  }
+  if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
+    return { verdict: "incompatible", reason: incompatibleReason(f, f.runtimeCompat) };
+  }
+  if (f.lockstep.pinned) {
+    return {
+      verdict: "pinned",
+      reason: `Framework-pinned (${f.lockstep.framework}) \u2014 update via ${f.lockstep.tool}`
+    };
+  }
+  if (isStale(f)) {
+    const behind = majorOf(f.latest) - majorOf(f.version ?? f.range);
+    const age = yearsSince(f.lastPublish).toFixed(1);
+    return {
+      verdict: "stale",
+      reason: `${behind} major behind latest (${f.latest}) \xB7 last published ${age}y ago`
+    };
+  }
+  return { verdict: "safe", reason: "Independent \u2014 safe to auto-update (CI-gated)" };
+}
+
+// ../core/src/policy.ts
 function meetsVulnLevel(f, level) {
   if (f.verdict === "malware") return true;
   if (f.verdict !== "cve") return false;
@@ -24541,73 +24631,582 @@ function evaluatePolicy(findings, policy) {
     if (rules.minHealth !== void 0 && f.direct !== false && f.health !== void 0 && f.health < rules.minHealth) {
       violations.push({ rule: "min-health", dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
     }
+    if (rules.runtime && f.runtimeCompat) {
+      const rc = f.runtimeCompat;
+      const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
+      if (broken) {
+        violations.push({ rule: "runtime", dep: at, detail: f.reason });
+      } else if (rules.runtime === "latest-dropped" && rc.latestIncompatible) {
+        violations.push({
+          rule: "runtime",
+          dep: at,
+          detail: `newest release drops ${runtimeLabel(rc.target)} \u2014 the next bump breaks (ignore ${rc.firstIncompatible ?? "newer versions"}+)`
+        });
+      }
+    }
   }
   return { violations, fail: violations.length > 0 };
 }
 function policyNeeds(policy) {
   const r = policy.failOn ?? {};
-  return { latest: Boolean(r.license), health: r.minHealth !== void 0 };
+  return {
+    latest: Boolean(r.license),
+    health: r.minHealth !== void 0,
+    runtime: r.runtime !== void 0
+  };
 }
 function loadPolicy(path) {
   if (!(0, import_node_fs3.existsSync)(path)) return {};
   return JSON.parse((0, import_node_fs3.readFileSync)(path, "utf8"));
 }
 
-// ../core/src/verdict.ts
-var RANK = { unknown: 0, low: 1, medium: 2, high: 3, critical: 4 };
-var STALE_AGE_MS = 365 * 24 * 60 * 60 * 1e3;
-function worst(vulns) {
-  return vulns.reduce((acc, v) => RANK[v.severity] > RANK[acc] ? v.severity : acc, "unknown");
+// ../core/src/runtimes.ts
+var EMPTY = { constraints: {} };
+async function fetchRuntimeMeta(name, ecosystem) {
+  return cached(`runtimes:${ecosystem}:${name}`, async () => {
+    try {
+      if (ecosystem === "npm") {
+        const r2 = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, {
+          headers: { Accept: "application/vnd.npm.install-v1+json" }
+        });
+        if (!r2.ok) return EMPTY;
+        const j2 = await r2.json();
+        const constraints2 = {};
+        for (const [v, meta] of Object.entries(j2.versions ?? {})) {
+          constraints2[v] = meta.engines?.node ?? null;
+        }
+        return { constraints: constraints2, latest: j2["dist-tags"]?.latest };
+      }
+      const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
+      if (!r.ok) return EMPTY;
+      const j = await r.json();
+      const constraints = {};
+      for (const [v, files] of Object.entries(j.releases ?? {})) {
+        const live = (files ?? []).filter((f) => !f.yanked);
+        if (live.length === 0) continue;
+        constraints[v] = live.find((f) => f.requires_python != null)?.requires_python ?? null;
+      }
+      return { constraints, latest: j.info?.version };
+    } catch (err) {
+      warn(`runtime metadata lookup failed for ${name}: ${err.message}`);
+      return EMPTY;
+    }
+  });
 }
-function exploitTail(vulns) {
-  if (vulns.some((v) => v.kev)) return " \xB7 actively exploited (KEV)";
-  const maxEpss = Math.max(0, ...vulns.map((v) => v.epss ?? 0));
-  return maxEpss >= 0.1 ? ` \xB7 EPSS ${maxEpss.toFixed(2)}` : "";
+async function fetchRuntimeMetaAll(names, ecosystem) {
+  const out = /* @__PURE__ */ new Map();
+  await Promise.all(
+    names.map(async (name) => {
+      out.set(name, await fetchRuntimeMeta(name, ecosystem));
+    })
+  );
+  return out;
 }
-function majorOf(spec) {
-  const m = spec?.match(/\d+/);
-  return m ? Number(m[0]) : void 0;
+
+// ../core/src/pep440.ts
+var VERSION_RE = new RegExp(
+  "^v?(?:(\\d+)!)?(\\d+(?:\\.\\d+)*)(?:[._-]?(a|alpha|b|beta|c|rc|pre|preview)[._-]?(\\d*))?(?:(?:-(\\d+))|(?:[._-]?(?:post|rev|r)[._-]?(\\d*)))?(?:[._-]?dev[._-]?(\\d*))?(?:\\+[a-z0-9]+(?:[._-][a-z0-9]+)*)?$",
+  // local (parsed, ignored for ordering)
+  "i"
+);
+var PRE_NORMALIZE = {
+  a: "a",
+  alpha: "a",
+  b: "b",
+  beta: "b",
+  c: "rc",
+  rc: "rc",
+  pre: "rc",
+  preview: "rc"
+};
+function parsePep440(s) {
+  const m = s.trim().match(VERSION_RE);
+  if (!m) return void 0;
+  const out = {
+    epoch: m[1] ? Number(m[1]) : 0,
+    release: m[2].split(".").map(Number)
+  };
+  if (m[3]) out.pre = [PRE_NORMALIZE[m[3].toLowerCase()], m[4] ? Number(m[4]) : 0];
+  if (m[5] !== void 0) out.post = Number(m[5]);
+  else if (m[6] !== void 0) out.post = m[6] ? Number(m[6]) : 0;
+  if (m[7] !== void 0) out.dev = m[7] ? Number(m[7]) : 0;
+  return out;
 }
-function yearsSince(iso) {
-  return (Date.now() - new Date(iso).getTime()) / (365 * 24 * 60 * 60 * 1e3);
+function isPrereleasePep440(v) {
+  return v.pre !== void 0 || v.dev !== void 0;
 }
-function isStale(f) {
-  if (!f.latest || !f.lastPublish) return false;
-  const current = majorOf(f.version ?? f.range);
-  const latest = majorOf(f.latest);
-  if (current === void 0 || latest === void 0 || latest <= current) return false;
-  const published = new Date(f.lastPublish).getTime();
-  return Number.isFinite(published) && Date.now() - published > STALE_AGE_MS;
-}
-function decideVerdict(f) {
-  if (f.vulns.some((v) => v.malicious)) {
-    return {
-      verdict: "malware",
-      reason: "Known-malicious package (OSV MAL advisory) \u2014 remove immediately"
-    };
+function cmpRelease(a, b) {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
   }
-  if (f.vulns.length > 0) {
-    const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
-    return {
-      verdict: "cve",
-      reason: `${f.vulns.length} advisory \xB7 ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`
-    };
+  return 0;
+}
+var PRE_ORDER = { a: 0, b: 1, rc: 2 };
+function comparePep440(a, b) {
+  if (a.epoch !== b.epoch) return a.epoch - b.epoch;
+  const r = cmpRelease(a.release, b.release);
+  if (r !== 0) return r;
+  const preKey = (v) => {
+    if (v.pre) return [0, PRE_ORDER[v.pre[0]], v.pre[1]];
+    if (v.post === void 0 && v.dev !== void 0) return [-1, 0, 0];
+    return [1, 0, 0];
+  };
+  const [ap, bp] = [preKey(a), preKey(b)];
+  for (let i = 0; i < 3; i++) if (ap[i] !== bp[i]) return ap[i] - bp[i];
+  const postKey = (v) => v.post === void 0 ? -1 : v.post;
+  if (postKey(a) !== postKey(b)) return postKey(a) - postKey(b);
+  const devKey = (v) => v.dev === void 0 ? Infinity : v.dev;
+  const d = devKey(a) - devKey(b);
+  return d === 0 || Number.isNaN(d) ? 0 : d;
+}
+function parseAtoms(specifiers) {
+  const atoms = [];
+  let unparseable = false;
+  for (const raw of specifiers.split(",")) {
+    const s = raw.trim();
+    if (s === "") continue;
+    const m = s.match(/^(===|==|!=|>=|<=|~=|>|<)\s*(.+)$/);
+    if (!m || m[1] === "===") {
+      unparseable = true;
+      continue;
+    }
+    const wildcard = m[2].endsWith(".*");
+    atoms.push({ op: m[1], value: wildcard ? m[2].slice(0, -2) : m[2], wildcard });
   }
-  if (f.lockstep.pinned) {
-    return {
-      verdict: "pinned",
-      reason: `Framework-pinned (${f.lockstep.framework}) \u2014 update via ${f.lockstep.tool}`
-    };
+  return { atoms, unparseable };
+}
+function prefixMatch(version, prefix) {
+  if (version.epoch !== prefix.epoch) return false;
+  return prefix.release.every((seg, i) => (version.release[i] ?? 0) === seg);
+}
+function atomAdmits(atom, v) {
+  const spec = parsePep440(atom.value);
+  if (!spec) return void 0;
+  if (atom.wildcard) {
+    if (atom.op === "==") return prefixMatch(v, spec);
+    if (atom.op === "!=") return !prefixMatch(v, spec);
+    return void 0;
   }
-  if (isStale(f)) {
-    const behind = majorOf(f.latest) - majorOf(f.version ?? f.range);
-    const age = yearsSince(f.lastPublish).toFixed(1);
-    return {
-      verdict: "stale",
-      reason: `${behind} major behind latest (${f.latest}) \xB7 last published ${age}y ago`
-    };
+  const c = comparePep440(v, spec);
+  switch (atom.op) {
+    case "==":
+      return c === 0;
+    case "!=":
+      return c !== 0;
+    case ">=":
+      return c >= 0;
+    case "<=":
+      return c <= 0;
+    case ">":
+      return c > 0;
+    case "<":
+      return c < 0;
+    case "~=": {
+      if (spec.release.length < 2) return void 0;
+      const ceilingPrefix = { epoch: spec.epoch, release: spec.release.slice(0, -1) };
+      return c >= 0 && prefixMatch(v, ceilingPrefix);
+    }
+    default:
+      return void 0;
   }
-  return { verdict: "safe", reason: "Independent \u2014 safe to auto-update (CI-gated)" };
+}
+function specifierAdmits(specifiers, version) {
+  const v = parsePep440(version);
+  if (!v) return void 0;
+  const { atoms, unparseable } = parseAtoms(specifiers);
+  let sawEvaluable = false;
+  for (const atom of atoms) {
+    const r = atomAdmits(atom, v);
+    if (r === false) return false;
+    if (r === true) sawEvaluable = true;
+  }
+  if (!sawEvaluable && (unparseable || atoms.length === 0)) return void 0;
+  return true;
+}
+function bump(rel) {
+  const out = rel.slice();
+  out[out.length - 1] += 1;
+  return out;
+}
+function rMaxLo(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = cmpRelease(a.rel, b.rel);
+  if (c !== 0) return c > 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { rel: a.rel, inclusive: false };
+}
+function rMinHi(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = cmpRelease(a.rel, b.rel);
+  if (c !== 0) return c < 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { rel: a.rel, inclusive: false };
+}
+function rEmpty(iv) {
+  if (!iv.lo || !iv.hi) return false;
+  const c = cmpRelease(iv.lo.rel, iv.hi.rel);
+  if (c > 0) return true;
+  if (c === 0) return !(iv.lo.inclusive && iv.hi.inclusive);
+  return false;
+}
+function rContains(outer, inner) {
+  const loOk = !outer.lo || inner.lo !== null && (cmpRelease(outer.lo.rel, inner.lo.rel) < 0 || cmpRelease(outer.lo.rel, inner.lo.rel) === 0 && (outer.lo.inclusive || !inner.lo.inclusive));
+  const hiOk = !outer.hi || inner.hi !== null && (cmpRelease(outer.hi.rel, inner.hi.rel) > 0 || cmpRelease(outer.hi.rel, inner.hi.rel) === 0 && (outer.hi.inclusive || !inner.hi.inclusive));
+  return loOk && hiOk;
+}
+function specifierAdmitsSeries(specifiers, target) {
+  const t = parsePep440(target);
+  if (!t || t.pre || t.post !== void 0 || t.dev !== void 0) return void 0;
+  let iv = {
+    lo: { rel: t.release, inclusive: true },
+    hi: { rel: bump(t.release), inclusive: false }
+  };
+  const holes = [];
+  const { atoms, unparseable } = parseAtoms(specifiers);
+  let sawEvaluable = false;
+  for (const atom of atoms) {
+    const spec = parsePep440(atom.value);
+    if (!spec || spec.pre || spec.dev !== void 0) continue;
+    const rel = spec.release;
+    sawEvaluable = true;
+    switch (atom.op) {
+      case ">=":
+        iv = { lo: rMaxLo(iv.lo, { rel, inclusive: true }), hi: iv.hi };
+        break;
+      case ">":
+        iv = { lo: rMaxLo(iv.lo, { rel, inclusive: false }), hi: iv.hi };
+        break;
+      case "<=":
+        iv = { lo: iv.lo, hi: rMinHi(iv.hi, { rel, inclusive: true }) };
+        break;
+      case "<":
+        iv = { lo: iv.lo, hi: rMinHi(iv.hi, { rel, inclusive: false }) };
+        break;
+      case "==":
+        if (atom.wildcard) {
+          iv = {
+            lo: rMaxLo(iv.lo, { rel, inclusive: true }),
+            hi: rMinHi(iv.hi, { rel: bump(rel), inclusive: false })
+          };
+        } else {
+          iv = {
+            lo: rMaxLo(iv.lo, { rel, inclusive: true }),
+            hi: rMinHi(iv.hi, { rel, inclusive: true })
+          };
+        }
+        break;
+      case "!=":
+        holes.push(
+          atom.wildcard ? { lo: { rel, inclusive: true }, hi: { rel: bump(rel), inclusive: false } } : { lo: { rel, inclusive: true }, hi: { rel, inclusive: true } }
+        );
+        break;
+      case "~=": {
+        if (rel.length < 2) {
+          sawEvaluable = false;
+          continue;
+        }
+        iv = {
+          lo: rMaxLo(iv.lo, { rel, inclusive: true }),
+          hi: rMinHi(iv.hi, { rel: bump(rel.slice(0, -1)), inclusive: false })
+        };
+        break;
+      }
+      default:
+        continue;
+    }
+  }
+  if (rEmpty(iv)) return false;
+  if (holes.some((h) => rContains(h, iv))) return false;
+  if (!sawEvaluable && (unparseable || atoms.length === 0)) return void 0;
+  return true;
+}
+
+// ../core/src/semver.ts
+var VERSION_RE2 = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/;
+function parseSemver(s) {
+  const m = s.trim().match(VERSION_RE2);
+  if (!m) return void 0;
+  return {
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: Number(m[3]),
+    ...m[4] ? { prerelease: m[4].split(".") } : {}
+  };
+}
+function isPrereleaseSemver(v) {
+  return (v.prerelease?.length ?? 0) > 0;
+}
+function compareIds(a, b) {
+  const an = /^\d+$/.test(a);
+  const bn = /^\d+$/.test(b);
+  if (an && bn) return Number(a) - Number(b);
+  if (an) return -1;
+  if (bn) return 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+function compareSemver(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  if (a.patch !== b.patch) return a.patch - b.patch;
+  const ap = a.prerelease ?? [];
+  const bp = b.prerelease ?? [];
+  if (ap.length === 0 && bp.length === 0) return 0;
+  if (ap.length === 0) return 1;
+  if (bp.length === 0) return -1;
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    if (ap[i] === void 0) return -1;
+    if (bp[i] === void 0) return 1;
+    const c = compareIds(ap[i], bp[i]);
+    if (c !== 0) return c;
+  }
+  return 0;
+}
+var ZERO = { major: 0, minor: 0, patch: 0 };
+function sv(major, minor = 0, patch = 0) {
+  return { major, minor, patch };
+}
+function parsePartial(s) {
+  const t = s.trim().replace(/^v/, "");
+  if (t === "" || t === "*" || t.toLowerCase() === "x") return { parts: [0, 0, 0], given: 0 };
+  const m = t.match(/^(\d+)(?:\.(\d+|x|X|\*))?(?:\.(\d+|x|X|\*))?(?:-[0-9A-Za-z-.]+)?$/);
+  if (!m) return void 0;
+  const isNum = (p) => p !== void 0 && /^\d+$/.test(p);
+  const major = Number(m[1]);
+  if (!isNum(m[2])) return { parts: [major, 0, 0], given: 1 };
+  const minor = Number(m[2]);
+  if (!isNum(m[3])) return { parts: [major, minor, 0], given: 2 };
+  return { parts: [major, minor, Number(m[3])], given: 3 };
+}
+function partialInterval(s) {
+  const p = parsePartial(s);
+  if (!p) return void 0;
+  const [ma, mi, pa] = p.parts;
+  if (p.given === 0) return { lo: { v: ZERO, inclusive: true }, hi: null };
+  if (p.given === 1)
+    return { lo: { v: sv(ma), inclusive: true }, hi: { v: sv(ma + 1), inclusive: false } };
+  if (p.given === 2)
+    return { lo: { v: sv(ma, mi), inclusive: true }, hi: { v: sv(ma, mi + 1), inclusive: false } };
+  const exact = sv(ma, mi, pa);
+  return { lo: { v: exact, inclusive: true }, hi: { v: exact, inclusive: true } };
+}
+function comparatorInterval(raw) {
+  const s = raw.trim();
+  if (s === "") return void 0;
+  const opMatch = s.match(/^(>=|<=|>|<|=|\^|~)?\s*(.+)$/);
+  if (!opMatch) return void 0;
+  const op = opMatch[1] ?? "";
+  const rest = opMatch[2];
+  const p = parsePartial(rest);
+  if (!p) return void 0;
+  const [ma, mi, pa] = p.parts;
+  const v = sv(ma, mi, pa);
+  switch (op) {
+    case ">=":
+      return { lo: { v, inclusive: true }, hi: null };
+    case ">":
+      if (p.given === 1) return { lo: { v: sv(ma + 1), inclusive: true }, hi: null };
+      if (p.given === 2) return { lo: { v: sv(ma, mi + 1), inclusive: true }, hi: null };
+      return { lo: { v, inclusive: false }, hi: null };
+    case "<=":
+      if (p.given === 1) return { lo: null, hi: { v: sv(ma + 1), inclusive: false } };
+      if (p.given === 2) return { lo: null, hi: { v: sv(ma, mi + 1), inclusive: false } };
+      return { lo: null, hi: { v, inclusive: true } };
+    case "<":
+      return { lo: null, hi: { v, inclusive: false } };
+    case "^": {
+      let hi;
+      if (ma > 0 || p.given === 1) hi = sv(ma + 1);
+      else if (mi > 0 || p.given === 2) hi = sv(ma, mi + 1);
+      else hi = sv(ma, mi, pa + 1);
+      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
+    }
+    case "~": {
+      const hi = p.given <= 1 ? sv(ma + 1) : sv(ma, mi + 1);
+      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
+    }
+    default:
+      return partialInterval(rest);
+  }
+}
+function maxLo(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = compareSemver(a.v, b.v);
+  if (c !== 0) return c > 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
+}
+function minHi(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = compareSemver(a.v, b.v);
+  if (c !== 0) return c < 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
+}
+function isEmpty(iv) {
+  if (iv.empty) return true;
+  if (!iv.lo || !iv.hi) return false;
+  const c = compareSemver(iv.lo.v, iv.hi.v);
+  if (c > 0) return true;
+  if (c === 0) return !(iv.lo.inclusive && iv.hi.inclusive);
+  return false;
+}
+function branchInterval(branch) {
+  const b = branch.trim();
+  if (b === "") return { lo: { v: ZERO, inclusive: true }, hi: null };
+  const hyphen = b.split(/\s+-\s+/);
+  if (hyphen.length === 2) {
+    const lo = partialInterval(hyphen[0]);
+    const hi = partialInterval(hyphen[1]);
+    if (!lo || !hi) return void 0;
+    return { lo: lo.lo, hi: hi.hi };
+  }
+  let acc = { lo: null, hi: null };
+  for (const part of b.split(/\s+/)) {
+    const iv = comparatorInterval(part);
+    if (!iv) return void 0;
+    acc = { lo: maxLo(acc.lo, iv.lo), hi: minHi(acc.hi, iv.hi) };
+  }
+  if (isEmpty(acc)) acc.empty = true;
+  return acc;
+}
+function rangeIntervals(range) {
+  const intervals = [];
+  let unparseable = false;
+  for (const branch of range.split("||")) {
+    const iv = branchInterval(branch);
+    if (iv) intervals.push(iv);
+    else unparseable = true;
+  }
+  return { intervals, unparseable };
+}
+function within(v, iv) {
+  if (isEmpty(iv)) return false;
+  if (iv.lo) {
+    const c = compareSemver(v, iv.lo.v);
+    if (c < 0 || c === 0 && !iv.lo.inclusive) return false;
+  }
+  if (iv.hi) {
+    const c = compareSemver(v, iv.hi.v);
+    if (c > 0 || c === 0 && !iv.hi.inclusive) return false;
+  }
+  return true;
+}
+function satisfies(version, range) {
+  const v = parseSemver(version);
+  if (!v) return void 0;
+  const { intervals, unparseable } = rangeIntervals(range);
+  if (intervals.some((iv) => within(v, iv))) return true;
+  return unparseable || intervals.length === 0 ? void 0 : false;
+}
+function intersects(a, b) {
+  if (isEmpty(a) || isEmpty(b)) return false;
+  const lo = maxLo(a.lo, b.lo);
+  const hi = minHi(a.hi, b.hi);
+  return !isEmpty({ lo, hi });
+}
+function rangeAdmitsSeries(range, target) {
+  const series = partialInterval(target);
+  if (!series) return void 0;
+  const { intervals, unparseable } = rangeIntervals(range);
+  if (intervals.some((iv) => intersects(iv, series))) return true;
+  return unparseable || intervals.length === 0 ? void 0 : false;
+}
+
+// ../core/src/runtime-compat.ts
+function orderedReleases(meta, ecosystem) {
+  const out = [];
+  for (const [version, constraint] of Object.entries(meta.constraints)) {
+    if (ecosystem === "npm") {
+      const v = parseSemver(version);
+      if (!v || isPrereleaseSemver(v)) continue;
+      out.push({ version, constraint, key: v });
+    } else {
+      const v = parsePep440(version);
+      if (!v || isPrereleasePep440(v)) continue;
+      out.push({ version, constraint, key: v });
+    }
+  }
+  out.sort(
+    (a, b) => ecosystem === "npm" ? compareSemver(a.key, b.key) : comparePep440(a.key, b.key)
+  );
+  return out.map(({ version, constraint }) => ({ version, constraint }));
+}
+function admits(constraint, target, ecosystem) {
+  if (constraint === null) return true;
+  const r = ecosystem === "npm" ? rangeAdmitsSeries(constraint, target.version) : specifierAdmitsSeries(constraint, target.version);
+  return r !== false;
+}
+function inRange(version, range, ecosystem) {
+  const r = range.trim();
+  if (r === "" || r === "*" || r === "latest") return true;
+  const result = ecosystem === "npm" ? satisfies(version, r) : specifierAdmits(r, version);
+  return result !== false;
+}
+function computeRuntimeCompat(dep, meta, target, ecosystem) {
+  const releases = orderedReleases(meta, ecosystem);
+  if (releases.length === 0) return void 0;
+  let maxCompatible;
+  for (const r of releases) {
+    if (admits(r.constraint, target, ecosystem)) maxCompatible = r.version;
+  }
+  let firstIncompatible;
+  let constraint;
+  if (maxCompatible !== void 0) {
+    const idx = releases.findIndex((r) => r.version === maxCompatible);
+    const next = releases[idx + 1];
+    if (next) {
+      firstIncompatible = next.version;
+      constraint = next.constraint ?? void 0;
+    }
+  } else {
+    firstIncompatible = releases[0].version;
+    constraint = releases[0].constraint ?? void 0;
+  }
+  const inRangeReleases = releases.filter((r) => inRange(r.version, dep.range, ecosystem));
+  const rangeUnsatisfiable = inRangeReleases.length > 0 && !inRangeReleases.some((r) => admits(r.constraint, target, ecosystem));
+  const resolved = dep.version ? releases.find((r) => r.version === dep.version) : void 0;
+  const resolvedIncompatible = resolved !== void 0 && !admits(resolved.constraint, target, ecosystem);
+  const latest = meta.latest ?? releases[releases.length - 1]?.version;
+  const latestRelease = releases.find((r) => r.version === latest);
+  const latestIncompatible = latestRelease !== void 0 && !admits(latestRelease.constraint, target, ecosystem);
+  if (!rangeUnsatisfiable && !resolvedIncompatible && !latestIncompatible) return void 0;
+  return {
+    target,
+    rangeUnsatisfiable,
+    resolvedIncompatible,
+    latestIncompatible,
+    maxCompatible,
+    firstIncompatible,
+    constraint
+  };
+}
+
+// ../core/src/runtime-detect.ts
+var import_node_fs4 = require("fs");
+var import_node_path3 = require("path");
+var FILES = [
+  ["node", ".nvmrc"],
+  ["node", ".node-version"],
+  ["python", ".python-version"]
+];
+function detectRuntimes(dir) {
+  const out = {};
+  for (const [runtime, file] of FILES) {
+    if (out[runtime]) continue;
+    const p = (0, import_node_path3.join)(dir, file);
+    if (!(0, import_node_fs4.existsSync)(p)) continue;
+    let raw;
+    try {
+      raw = (0, import_node_fs4.readFileSync)(p, "utf8");
+    } catch {
+      continue;
+    }
+    const version = (raw.split("\n")[0] ?? "").trim().replace(/^v/, "");
+    if (!/^\d+(\.\d+)*$/.test(version)) continue;
+    out[runtime] = { runtime, version, source: file, explicit: false };
+  }
+  return out;
 }
 
 // ../core/src/sarif.ts
@@ -24669,9 +25268,9 @@ function toSarif(reports) {
 }
 
 // ../core/src/analyze.ts
-var import_node_fs4 = require("fs");
+var import_node_fs5 = require("fs");
 var import_node_os = require("os");
-var import_node_path3 = require("path");
+var import_node_path4 = require("path");
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
 }
@@ -24679,16 +25278,19 @@ async function analyzeManifest(manifest, opts = {}) {
   const { dependencies, ecosystem } = manifest;
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
-  const [vulnMap, registryMap, healthMap] = await Promise.all([
+  const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
+  const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
-    opts.health ? fetchHealthAll(directDeps, ecosystem) : void 0
+    opts.health ? fetchHealthAll(directDeps, ecosystem) : void 0,
+    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem) : void 0
   ]);
   await enrichExploitability(vulnMap);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
     const health = healthMap?.get(d.name);
     const direct = d.direct !== false;
+    const runtimeMeta = direct && runtimeTarget ? runtimeMap?.get(d.name) : void 0;
     const base = {
       name: d.name,
       range: d.range,
@@ -24705,14 +25307,29 @@ async function analyzeManifest(manifest, opts = {}) {
       // surface only the weak spots
       installScript: d.installScript,
       // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
-      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : void 0
+      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : void 0,
+      runtimeCompat: runtimeMeta ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget, ecosystem) : void 0
     };
     const { verdict, reason } = decideVerdict(base);
     return { ...base, verdict, reason };
   });
-  const summary = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
+  const summary = {
+    malware: 0,
+    cve: 0,
+    incompatible: 0,
+    pinned: 0,
+    stale: 0,
+    safe: 0
+  };
   for (const f of findings) summary[f.verdict] += 1;
-  return { ecosystem, path: manifest.path, total: findings.length, findings, summary };
+  return {
+    ecosystem,
+    path: manifest.path,
+    total: findings.length,
+    findings,
+    summary,
+    runtimeTarget
+  };
 }
 async function enrichExploitability(vulnMap) {
   const vulns = [...new Set([...vulnMap.values()].flat())];
@@ -24756,6 +25373,7 @@ var ISSUE_MARKER = "<!-- preflight-scheduled -->";
 var EMOJI = {
   malware: "\u2623\uFE0F",
   cve: "\u{1F7E5}",
+  incompatible: "\u26D4",
   pinned: "\u{1F7E8}",
   stale: "\u{1F7EA}",
   safe: "\u{1F7E9}"
@@ -24763,11 +25381,19 @@ var EMOJI = {
 var LABEL = {
   malware: "MALWARE",
   cve: "CVE",
+  incompatible: "INCOMPAT",
   pinned: "PINNED",
   stale: "STALE",
   safe: "SAFE"
 };
-var ORDER = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
+var ORDER = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5
+};
 function diffDeclared(base, head) {
   const baseRange = new Map(base.map((d) => [d.name, d.range]));
   const changes = /* @__PURE__ */ new Map();
@@ -24836,9 +25462,11 @@ function renderComment(results) {
     lines.push("| Verdict | Package | Change | Note |", "| --- | --- | --- | --- |");
     for (const f of findings) {
       const ver = f.version ?? f.range;
+      const nextBumpBreaks = f.runtimeCompat?.latestIncompatible && f.verdict !== "incompatible" ? `\u23EB newest release drops ${runtimeLabel(f.runtimeCompat.target)}` : "";
       const flags = [
         f.installScript ? "\u2699 install script" : "",
         f.suspiciousName ? `\u26A0 resembles \`${f.suspiciousName.similarTo}\`` : "",
+        nextBumpBreaks,
         f.license ? `\xB7 ${f.license}` : ""
       ].filter(Boolean).join(" ");
       const note = flags ? `${f.reason} ${flags}` : f.reason;
@@ -24866,6 +25494,23 @@ function renderComment(results) {
 
 // src/index.ts
 var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
+function resolveRuntimes(policy) {
+  const targets = detectRuntimes(".");
+  for (const runtime of ["node", "python"]) {
+    const input = core.getInput(`${runtime}-version`);
+    if (input) {
+      targets[runtime] = { runtime, version: input, source: `${runtime}-version input`, explicit: true };
+    } else if (policy?.runtimes?.[runtime]) {
+      targets[runtime] = {
+        runtime,
+        version: policy.runtimes[runtime],
+        source: "policy file",
+        explicit: true
+      };
+    }
+  }
+  return targets;
+}
 async function run() {
   const octokit = github.getOctokit(core.getInput("github-token"));
   const { owner, repo } = github.context.repo;
@@ -24874,7 +25519,7 @@ async function run() {
   const policyFile = core.getInput("policy-file");
   const policy = policyFile ? loadPolicy(policyFile) : void 0;
   if ((core.getInput("mode") || "pr") === "repo") {
-    await runRepoScan(octokit, owner, repo, failOnCve);
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -24898,7 +25543,10 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     core.info("No dependency manifests changed in this PR.");
     return;
   }
-  const analyzeOpts = policy ? policyNeeds(policy) : {};
+  const analyzeOpts = {
+    ...policy ? policyNeeds(policy) : {},
+    runtimes: resolveRuntimes(policy)
+  };
   const results = [];
   for (const f of manifests) {
     const path = f.filename;
@@ -24934,13 +25582,13 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     core.setFailed(`Preflight: this PR introduces a dependency that ${why}.`);
   }
 }
-async function runRepoScan(octokit, owner, repo, failOnCve) {
+async function runRepoScan(octokit, owner, repo, failOnCve, runtimes) {
   const paths = findManifests(".");
   core.info(`Scanning ${paths.length} manifest(s).`);
   const reports = [];
   for (const path of paths) {
     try {
-      reports.push(await analyze(path));
+      reports.push(await analyze(path, { runtimes }));
     } catch (err) {
       core.warning(`Skipped ${path}: ${err.message}`);
     }
@@ -24954,15 +25602,15 @@ async function runRepoScan(octokit, owner, repo, failOnCve) {
   }
 }
 function writeSarif(reports) {
-  (0, import_node_fs5.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
+  (0, import_node_fs6.writeFileSync)("preflight.sarif", JSON.stringify(toSarif(reports)));
   core.setOutput("sarif-file", "preflight.sarif");
 }
 function findManifests(root) {
   const skip = /* @__PURE__ */ new Set(["node_modules", "dist", "coverage"]);
   const out = [];
   const walk = (dir) => {
-    for (const e of (0, import_node_fs5.readdirSync)(dir, { withFileTypes: true })) {
-      const p = (0, import_node_path4.join)(dir, e.name);
+    for (const e of (0, import_node_fs6.readdirSync)(dir, { withFileTypes: true })) {
+      const p = (0, import_node_path5.join)(dir, e.name);
       if (e.isDirectory()) {
         if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);
       } else if (MANIFEST.test(e.name)) {

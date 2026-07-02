@@ -26,7 +26,7 @@ function finding(name: string, verdict: Verdict, range = '^1.0.0'): Finding {
 }
 
 function report(findings: Finding[]): Report {
-  const summary: Report['summary'] = { malware: 0, cve: 0, pinned: 0, stale: 0, safe: 0 };
+  const summary: Report['summary'] = { malware: 0, cve: 0, incompatible: 0, pinned: 0, stale: 0, safe: 0 };
   for (const f of findings) summary[f.verdict] += 1;
   return { ecosystem: 'npm', path: 'package.json', total: findings.length, findings, summary };
 }
@@ -81,6 +81,43 @@ describe('renderComment', () => {
 
   it('flags introduced CVEs in the footer', () => {
     expect(renderComment([withCve])).toContain('introduces 1 dependency with a known CVE');
+  });
+
+  it('renders an incompatible row and the next-bump-breaks flag', () => {
+    const target = { runtime: 'python' as const, version: '3.9', source: 'input', explicit: true };
+    const broken = {
+      ...finding('uvicorn', 'incompatible', '>=0.49'),
+      runtimeCompat: {
+        target,
+        rangeUnsatisfiable: true,
+        resolvedIncompatible: false,
+        latestIncompatible: true,
+        maxCompatible: '0.39.0',
+        firstIncompatible: '0.40.0',
+      },
+    };
+    const warned = {
+      ...finding('fastapi', 'safe'),
+      runtimeCompat: {
+        target,
+        rangeUnsatisfiable: false,
+        resolvedIncompatible: false,
+        latestIncompatible: true,
+        firstIncompatible: '0.129.0',
+      },
+    };
+    const body = renderComment([
+      {
+        path: 'requirements.txt',
+        report: report([broken, warned]),
+        changes: new Map([
+          ['uvicorn', 'added'],
+          ['fastapi', 'added'],
+        ] as const),
+      },
+    ]);
+    expect(body).toContain('| ⛔ INCOMPAT |');
+    expect(body).toContain('⏫ newest release drops Python 3.9'); // on the safe row only
   });
 
   it('says all-clear when changed deps are clean', () => {

@@ -1,4 +1,4 @@
-import type { Finding, Severity, Vuln } from './types';
+import type { Finding, RuntimeCompat, RuntimeTarget, Severity, Vuln } from './types';
 
 const RANK: Record<Severity, number> = { unknown: 0, low: 1, medium: 2, high: 3, critical: 4 };
 
@@ -25,6 +25,32 @@ function majorOf(spec: string | undefined): number | undefined {
 /** Whole years since an ISO timestamp, for human-readable reasons. */
 function yearsSince(iso: string): number {
   return (Date.now() - new Date(iso).getTime()) / (365 * 24 * 60 * 60 * 1000);
+}
+
+/** "Node 18" / "Python 3.9", with where the target came from when it was auto-detected. */
+export function runtimeLabel(t: RuntimeTarget, withSource = false): string {
+  const name = t.runtime === 'node' ? 'Node' : 'Python';
+  const src = withSource && !t.explicit ? ` (${t.source})` : '';
+  return `${name} ${t.version}${src}`;
+}
+
+/** Why the boundary version excludes the target: pip's Requires-Python is a hard install
+ * failure; npm engines is advisory (enforced only under engine-strict), so word it softer. */
+function constraintPhrase(rc: RuntimeCompat): string {
+  if (!rc.firstIncompatible || !rc.constraint) return '';
+  const verb = rc.target.runtime === 'python' ? 'requires Python' : 'declares engines node';
+  return ` (${rc.firstIncompatible}+ ${verb} ${rc.constraint})`;
+}
+
+function incompatibleReason(f: Omit<Finding, 'verdict' | 'reason'>, rc: RuntimeCompat): string {
+  const max = rc.maxCompatible ? ` — max compatible ${rc.maxCompatible}` : '';
+  const tail = f.lockstep.pinned
+    ? ` · framework-pinned (${f.lockstep.framework}) — fix via ${f.lockstep.tool}`
+    : '';
+  if (rc.rangeUnsatisfiable) {
+    return `No version in "${f.range}" installs on ${runtimeLabel(rc.target, true)}${constraintPhrase(rc)}${max}${tail}`;
+  }
+  return `Locked ${f.version} does not install on ${runtimeLabel(rc.target, true)}${constraintPhrase(rc)}${max}${tail}`;
 }
 
 /** True when the dep is ≥1 major behind `latest` and its last publish is older than the cutoff. */
@@ -56,6 +82,12 @@ export function decideVerdict(f: Omit<Finding, 'verdict' | 'reason'>): {
       verdict: 'cve',
       reason: `${f.vulns.length} advisory · ${worst(f.vulns)}${exploitTail(f.vulns)}${tail}`,
     };
+  }
+  // An uninstallable dep outranks lockstep/staleness: it is primarily broken. Only the
+  // range/locked cases decide the verdict — `latestIncompatible` alone is a warning line
+  // in the renderers, not a verdict (today's install still works).
+  if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
+    return { verdict: 'incompatible', reason: incompatibleReason(f, f.runtimeCompat) };
   }
   if (f.lockstep.pinned) {
     return {

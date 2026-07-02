@@ -230,6 +230,11 @@ body {
   background: var(--bg-danger);
   color: var(--text-danger);
 }
+.badge.incompatible {
+  background: var(--bg-accent);
+  color: var(--text-accent);
+  font-weight: 500;
+}
 .badge.pinned {
   background: var(--bg-warning);
   color: var(--text-warning);

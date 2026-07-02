@@ -32,7 +32,7 @@ const report: Report = {
       reason: 'x',
     },
   ],
-  summary: { malware: 0, cve: 1, pinned: 0, stale: 0, safe: 1 },
+  summary: { malware: 0, cve: 1, incompatible: 0, pinned: 0, stale: 0, safe: 1 },
 };
 
 describe('toCycloneDX', () => {

@@ -5,7 +5,7 @@ export type Ecosystem = 'npm' | 'PyPI';
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
-export type Verdict = 'malware' | 'cve' | 'pinned' | 'stale' | 'safe';
+export type Verdict = 'malware' | 'cve' | 'incompatible' | 'pinned' | 'stale' | 'safe';
 
 export interface Dependency {
   name: string;
@@ -102,6 +102,8 @@ export interface Finding {
   license?: string;
   /** Set when the name looks like a typosquat of a popular package (offline heuristic). */
   suspiciousName?: { similarTo: string };
+  /** How the dep relates to the target runtime, when one was declared (absent = compatible). */
+  runtimeCompat?: RuntimeCompat;
   verdict: Verdict;
   reason: string;
 }
@@ -112,4 +114,6 @@ export interface Report {
   total: number;
   findings: Finding[];
   summary: Record<Verdict, number>;
+  /** The runtime the scan checked against (this manifest's ecosystem), when one applied. */
+  runtimeTarget?: RuntimeTarget;
 }
