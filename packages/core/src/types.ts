@@ -50,6 +50,36 @@ export interface LockstepInfo {
   tool?: string; // the framework's own upgrade tool, e.g. "npx expo install"
 }
 
+export type RuntimeName = 'node' | 'python';
+
+/** A target runtime the manifest must install on, e.g. node "18" or python "3.9". */
+export interface RuntimeTarget {
+  runtime: RuntimeName;
+  /** Possibly-partial version: "18" means the whole 18.x series, "3.9" the 3.9.x series. */
+  version: string;
+  /** Where the target came from, for messages: "--python flag", ".nvmrc", "preflight.config.json". */
+  source: string;
+  /** Flag/config targets are explicit; auto-detected ones warn without failing builds. */
+  explicit: boolean;
+}
+
+/** How a dependency relates to a target runtime (absent = fully compatible). */
+export interface RuntimeCompat {
+  target: RuntimeTarget;
+  /** No version satisfying the declared range installs on the target (the bad-floor case). */
+  rangeUnsatisfiable: boolean;
+  /** The locked/pinned version itself doesn't install on the target. */
+  resolvedIncompatible: boolean;
+  /** The newest release dropped the target — the next auto-bump will break. */
+  latestIncompatible: boolean;
+  /** Highest version that still installs on the target (floor / downgrade advice). */
+  maxCompatible?: string;
+  /** Lowest version above maxCompatible — the auto-updater ignore boundary. */
+  firstIncompatible?: string;
+  /** The declared constraint that excludes the target (e.g. ">=3.10"), for messages. */
+  constraint?: string;
+}
+
 export interface Finding {
   name: string;
   range: string;

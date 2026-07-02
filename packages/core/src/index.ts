@@ -17,6 +17,22 @@ export {
   type Violation,
 } from './policy';
 export { decideVerdict } from './verdict';
+export { fetchRuntimeMeta, fetchRuntimeMetaAll, type RuntimeMeta } from './runtimes';
+export { computeRuntimeCompat } from './runtime-compat';
+export {
+  compareSemver,
+  parseSemver,
+  rangeAdmitsSeries,
+  satisfies,
+  type SemVer,
+} from './semver';
+export {
+  comparePep440,
+  parsePep440,
+  specifierAdmits,
+  specifierAdmitsSeries,
+  type Pep440,
+} from './pep440';
 export { toCycloneDX } from './sbom';
 export { toSarif } from './sarif';
 export { cached, setCacheEnabled } from './cache';
