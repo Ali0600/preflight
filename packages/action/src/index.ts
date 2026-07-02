@@ -5,14 +5,17 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import {
   analyze,
+  detectRuntimes,
   evaluatePolicy,
   loadPolicy,
   parseManifestContent,
   policyNeeds,
   toSarif,
+  type AnalyzeOptions,
   type Dependency,
   type Policy,
   type Report,
+  type RuntimeName,
 } from '@preflight/core';
 
 import {
@@ -32,6 +35,25 @@ const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
+/** Target runtimes: explicit inputs win; otherwise version files at the repo root. */
+function resolveRuntimes(policy?: Policy): AnalyzeOptions['runtimes'] {
+  const targets = detectRuntimes('.');
+  for (const runtime of ['node', 'python'] as RuntimeName[]) {
+    const input = core.getInput(`${runtime}-version`);
+    if (input) {
+      targets[runtime] = { runtime, version: input, source: `${runtime}-version input`, explicit: true };
+    } else if (policy?.runtimes?.[runtime]) {
+      targets[runtime] = {
+        runtime,
+        version: policy.runtimes[runtime]!,
+        source: 'policy file',
+        explicit: true,
+      };
+    }
+  }
+  return targets;
+}
+
 async function run(): Promise<void> {
   const octokit = github.getOctokit(core.getInput('github-token'));
   const { owner, repo } = github.context.repo;
@@ -41,7 +63,7 @@ async function run(): Promise<void> {
   const policy = policyFile ? loadPolicy(policyFile) : undefined;
 
   if ((core.getInput('mode') || 'pr') === 'repo') {
-    await runRepoScan(octokit, owner, repo, failOnCve);
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -77,7 +99,10 @@ async function runPrScan(
   }
 
   // A policy's license/min-health rules need the extra registry/health lookups.
-  const analyzeOpts = policy ? policyNeeds(policy) : {};
+  const analyzeOpts: AnalyzeOptions = {
+    ...(policy ? policyNeeds(policy) : {}),
+    runtimes: resolveRuntimes(policy),
+  };
   const results: ManifestReport[] = [];
   for (const f of manifests) {
     const path = f.filename;
@@ -131,13 +156,14 @@ async function runRepoScan(
   owner: string,
   repo: string,
   failOnCve: boolean,
+  runtimes: AnalyzeOptions['runtimes'],
 ): Promise<void> {
   const paths = findManifests('.');
   core.info(`Scanning ${paths.length} manifest(s).`);
   const reports: Report[] = [];
   for (const path of paths) {
     try {
-      reports.push(await analyze(path));
+      reports.push(await analyze(path, { runtimes }));
     } catch (err) {
       core.warning(`Skipped ${path}: ${(err as Error).message}`);
     }

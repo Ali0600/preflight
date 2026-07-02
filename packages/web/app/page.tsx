@@ -17,6 +17,7 @@ export default function Page() {
   const [filename, setFilename] = useState('package.json');
   const [content, setContent] = useState(SAMPLE_PACKAGE_JSON);
   const [health, setHealth] = useState(false);
+  const [runtime, setRuntime] = useState('');
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ export default function Page() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ filename, content, health }),
+        body: JSON.stringify({ filename, content, health, runtime }),
       });
       const data = (await res.json()) as Report & { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
@@ -71,6 +72,15 @@ export default function Page() {
             <input type="checkbox" checked={health} onChange={(e) => setHealth(e.target.checked)} />
             Include OpenSSF health (slower)
           </label>
+          <input
+            className="select"
+            style={{ width: 150 }}
+            value={runtime}
+            placeholder={filename === 'requirements.txt' ? 'Python target, e.g. 3.9' : 'Node target, e.g. 18'}
+            aria-label="target runtime version"
+            onChange={(e) => setRuntime(e.target.value)}
+          />
+
           <button className="btn" onClick={run} disabled={loading}>
             {loading ? 'Pre-flighting…' : 'Pre-flight'}
           </button>
@@ -90,6 +100,8 @@ function Dashboard({ report }: { report: Report }) {
     <>
       <div className="header-sub" style={{ marginBottom: 12 }}>
         {report.path} · {report.ecosystem}
+        {report.runtimeTarget &&
+          ` · target ${report.runtimeTarget.runtime === 'node' ? 'Node' : 'Python'} ${report.runtimeTarget.version}`}
       </div>
 
       <div className="cards">
@@ -163,6 +175,13 @@ function Row({ finding }: { finding: Finding }) {
         {finding.installScript && (
           <div className="row-warn">
             <i className="ti ti-terminal-2" aria-hidden /> runs an install script
+          </div>
+        )}
+        {finding.runtimeCompat?.latestIncompatible && finding.verdict !== 'incompatible' && (
+          <div className="row-warn">
+            <i className="ti ti-arrow-big-up-line" aria-hidden /> newest release drops the target
+            runtime{finding.runtimeCompat.firstIncompatible &&
+              ` — ignore ${finding.runtimeCompat.firstIncompatible}+ in your auto-updater`}
           </div>
         )}
         {finding.healthChecks && finding.healthChecks.length > 0 && (

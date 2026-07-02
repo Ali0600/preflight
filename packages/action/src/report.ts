@@ -1,4 +1,10 @@
-import { meetsVulnLevel, type Report, type Verdict, type Violation } from '@preflight/core';
+import {
+  meetsVulnLevel,
+  runtimeLabel,
+  type Report,
+  type Verdict,
+  type Violation,
+} from '@preflight/core';
 
 // Pure presentation/diff logic — no @actions/* imports, so it's unit-testable on its own.
 
@@ -26,6 +32,7 @@ export const ISSUE_MARKER = '<!-- preflight-scheduled -->';
 const EMOJI: Record<Verdict, string> = {
   malware: '☣️',
   cve: '🟥',
+  incompatible: '⛔',
   pinned: '🟨',
   stale: '🟪',
   safe: '🟩',
@@ -33,11 +40,19 @@ const EMOJI: Record<Verdict, string> = {
 const LABEL: Record<Verdict, string> = {
   malware: 'MALWARE',
   cve: 'CVE',
+  incompatible: 'INCOMPAT',
   pinned: 'PINNED',
   stale: 'STALE',
   safe: 'SAFE',
 };
-const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
+const ORDER: Record<Verdict, number> = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5,
+};
 
 export interface ManifestReport {
   path: string;
@@ -135,9 +150,14 @@ export function renderComment(results: ManifestReport[]): string {
     lines.push('| Verdict | Package | Change | Note |', '| --- | --- | --- | --- |');
     for (const f of findings) {
       const ver = f.version ?? f.range;
+      const nextBumpBreaks =
+        f.runtimeCompat?.latestIncompatible && f.verdict !== 'incompatible'
+          ? `⏫ newest release drops ${runtimeLabel(f.runtimeCompat.target)}`
+          : '';
       const flags = [
         f.installScript ? '⚙ install script' : '',
         f.suspiciousName ? `⚠ resembles \`${f.suspiciousName.similarTo}\`` : '',
+        nextBumpBreaks,
         f.license ? `· ${f.license}` : '',
       ]
         .filter(Boolean)

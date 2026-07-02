@@ -33,7 +33,12 @@ parent's peer range), not just the static list.
   Docs: https://docs.deps.dev/api/v3/
 - **npm registry** — `GET registry.npmjs.org/{name}` → `dist-tags.latest`, `time` (last publish).
 - **PyPI** — `GET pypi.org/pypi/{name}/json` → `info.version`.
-- **endoflife.date** — `GET /api/{product}.json` (runtime/framework EOL).
+- **npm registry (corgi)** — `GET registry.npmjs.org/{name}` with
+  `Accept: application/vnd.npm.install-v1+json` → per-version `engines` (runtime compatibility).
+- **PyPI releases** — same `pypi.org/pypi/{name}/json` doc → `releases[version][].requires_python`.
+- ~~**endoflife.date** — `GET /api/{product}.json` (runtime/framework EOL).~~ Superseded by the
+  per-package runtime check above (`runtimes.ts` + `runtime-compat.ts`) — per-version
+  `engines`/`Requires-Python` against a declared target is more precise than product EOL dates.
 
 ## Non-functional
 - Batch OSV (one `querybatch`); **cache** responses on disk (`.preflight-cache/`, ~24h TTL) to

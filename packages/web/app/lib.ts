@@ -16,12 +16,20 @@ export const SAMPLE_PACKAGE_JSON = `{
 export const VERDICT_META: Record<Verdict, { label: string; icon: string }> = {
   malware: { label: 'Malware', icon: 'ti-biohazard' },
   cve: { label: 'CVE', icon: 'ti-alert-triangle' },
+  incompatible: { label: 'Incompatible', icon: 'ti-plug-off' },
   pinned: { label: 'Pinned', icon: 'ti-lock' },
   stale: { label: 'Stale', icon: 'ti-clock' },
   safe: { label: 'Safe', icon: 'ti-circle-check' },
 };
 
-const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
+const ORDER: Record<Verdict, number> = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5,
+};
 
 /** Problems first: cve, then pinned, stale, safe. */
 export function sortFindings(findings: Finding[]): Finding[] {
@@ -63,6 +71,10 @@ export function insight(report: Report): string {
   const parts: string[] = [];
   if (summary.cve > 0)
     parts.push(`${summary.cve} ${summary.cve === 1 ? 'CVE needs' : 'CVEs need'} attention before merging`);
+  if (summary.incompatible > 0)
+    parts.push(
+      `${summary.incompatible} cannot install on ${report.runtimeTarget ? `${report.runtimeTarget.runtime === 'node' ? 'Node' : 'Python'} ${report.runtimeTarget.version}` : 'the target runtime'}`,
+    );
   if (summary.pinned > 0)
     parts.push(`${summary.pinned} framework-pinned — bump via the framework's tool, not per-package`);
   parts.push(`${summary.safe} of ${total} independent and safe to auto-update now`);

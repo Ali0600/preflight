@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import { licenseRisk } from './license';
-import type { Finding } from './types';
+import { runtimeLabel } from './verdict';
+import type { Finding, RuntimeName } from './types';
 
 // A policy turns Preflight's signals into a configurable gate. It's the same engine the CLI
 // (`--policy`) and the Action (`policy-file`) share — so "what fails the build" lives in one place.
@@ -18,7 +19,14 @@ export interface Policy {
     license?: string[];
     /** Fail if a direct dependency's OpenSSF health score is below this (0–10). */
     minHealth?: number;
+    /** Fail on runtime incompatibility: 'incompatible' = the range/locked version cannot
+     * install on the target runtime; 'latest-dropped' also fails when the newest release
+     * dropped it (the next auto-bump would break). */
+    runtime?: 'incompatible' | 'latest-dropped';
   };
+  /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
+   * Shared config-file home for the CLI/Action (flags override). */
+  runtimes?: Partial<Record<RuntimeName, string>>;
 }
 
 export interface Violation {
@@ -78,14 +86,31 @@ export function evaluatePolicy(
     ) {
       violations.push({ rule: 'min-health', dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
     }
+    if (rules.runtime && f.runtimeCompat) {
+      const rc = f.runtimeCompat;
+      const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
+      if (broken) {
+        violations.push({ rule: 'runtime', dep: at, detail: f.reason });
+      } else if (rules.runtime === 'latest-dropped' && rc.latestIncompatible) {
+        violations.push({
+          rule: 'runtime',
+          dep: at,
+          detail: `newest release drops ${runtimeLabel(rc.target)} — the next bump breaks (ignore ${rc.firstIncompatible ?? 'newer versions'}+)`,
+        });
+      }
+    }
   }
   return { violations, fail: violations.length > 0 };
 }
 
-/** Does this policy need latest-version / health data to be evaluated? (drives the fetch flags) */
-export function policyNeeds(policy: Policy): { latest: boolean; health: boolean } {
+/** Does this policy need latest-version / health / runtime data to be evaluated? (drives fetches) */
+export function policyNeeds(policy: Policy): { latest: boolean; health: boolean; runtime: boolean } {
   const r = policy.failOn ?? {};
-  return { latest: Boolean(r.license), health: r.minHealth !== undefined };
+  return {
+    latest: Boolean(r.license),
+    health: r.minHealth !== undefined,
+    runtime: r.runtime !== undefined,
+  };
 }
 
 /** Load a JSON policy file, or an empty policy when the file is absent. */

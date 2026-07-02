@@ -22,7 +22,15 @@ inputs:
     required: false
     default: 'pr'
   policy-file:
-    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level — instead of fail-level.'
+    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level, runtime — instead of fail-level.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Target Node runtime the manifests must install on (e.g. "18" = the whole 18.x series). Empty = auto-detect from .nvmrc/.node-version at the repo root.'
+    required: false
+    default: ''
+  python-version:
+    description: 'Target Python runtime the manifests must install on (e.g. "3.9"). Empty = auto-detect from .python-version at the repo root.'
     required: false
     default: ''
 runs:

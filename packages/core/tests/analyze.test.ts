@@ -40,3 +40,49 @@ describe('analyzeFiles', () => {
     await expect(analyzeFiles({ 'README.md': '# hi' })).rejects.toThrow(/No package\.json/);
   });
 });
+
+describe('analyzeFiles — runtime target', () => {
+  it('attaches runtimeCompat and the incompatible verdict end-to-end (pip on Python 3.9)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('pypi.org/pypi/uvicorn')) {
+          return new Response(
+            JSON.stringify({
+              info: { version: '0.49.0' },
+              releases: {
+                '0.39.0': [{ filename: 'u.whl', requires_python: '>=3.9', yanked: false }],
+                '0.49.0': [{ filename: 'u.whl', requires_python: '>=3.10', yanked: false }],
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ results: [] }), { status: 200 }); // OSV
+      }),
+    );
+    const report = await analyzeFiles(
+      { 'requirements.txt': 'uvicorn>=0.49\n' },
+      {
+        runtimes: {
+          python: { runtime: 'python', version: '3.9', source: '--python flag', explicit: true },
+        },
+      },
+    );
+    expect(report.runtimeTarget?.version).toBe('3.9');
+    expect(report.summary.incompatible).toBe(1);
+    const f = report.findings.find((x) => x.name === 'uvicorn');
+    expect(f?.verdict).toBe('incompatible');
+    expect(f?.runtimeCompat?.maxCompatible).toBe('0.39.0');
+    expect(f?.reason).toContain('max compatible 0.39.0');
+  });
+
+  it('no target for the manifest ecosystem -> no runtime fetch, no runtimeCompat', async () => {
+    const report = await analyzeFiles(
+      { 'requirements.txt': 'uvicorn>=0.49\n' },
+      { runtimes: { node: { runtime: 'node', version: '18', source: '.nvmrc', explicit: false } } },
+    );
+    expect(report.runtimeTarget).toBeUndefined();
+    expect(report.findings[0]?.runtimeCompat).toBeUndefined();
+  });
+});

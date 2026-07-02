@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Vuln } from '../src/types';
+import type { RuntimeCompat, RuntimeTarget, Vuln } from '../src/types';
 import { decideVerdict } from '../src/verdict';
 
 const med: Vuln[] = [{ id: 'GHSA-test', summary: 'test advisory', severity: 'medium' }];
@@ -93,6 +93,73 @@ describe('decideVerdict — stale', () => {
   it('a CVE still wins over stale', () => {
     const r = decideVerdict({ ...base, vulns: med, latest: '3.0.0', lastPublish: daysAgo(800) });
     expect(r.verdict).toBe('cve');
+  });
+});
+
+const PY39: RuntimeTarget = {
+  runtime: 'python',
+  version: '3.9',
+  source: '.python-version',
+  explicit: false,
+};
+
+const badFloor: RuntimeCompat = {
+  target: PY39,
+  rangeUnsatisfiable: true,
+  resolvedIncompatible: false,
+  latestIncompatible: true,
+  maxCompatible: '0.39.0',
+  firstIncompatible: '0.40.0',
+  constraint: '>=3.10',
+};
+
+describe('decideVerdict — runtime incompatibility', () => {
+  const base = { name: 'uvicorn', range: '>=0.49', dev: false, vulns: [], lockstep: { pinned: false as const } };
+
+  it('an unsatisfiable range -> incompatible, naming the boundary and the max compatible', () => {
+    const r = decideVerdict({ ...base, runtimeCompat: badFloor });
+    expect(r.verdict).toBe('incompatible');
+    expect(r.reason).toContain('Python 3.9');
+    expect(r.reason).toContain('(.python-version)');
+    expect(r.reason).toContain('0.40.0+ requires Python >=3.10');
+    expect(r.reason).toContain('max compatible 0.39.0');
+  });
+
+  it('a locked incompatible version -> incompatible', () => {
+    const rc: RuntimeCompat = { ...badFloor, rangeUnsatisfiable: false, resolvedIncompatible: true };
+    const r = decideVerdict({ ...base, version: '0.49.0', runtimeCompat: rc });
+    expect(r.verdict).toBe('incompatible');
+    expect(r.reason).toContain('Locked 0.49.0');
+  });
+
+  it('npm engines wording is advisory ("declares engines node"), pip is hard ("requires Python")', () => {
+    const rc: RuntimeCompat = {
+      target: { runtime: 'node', version: '18', source: '--node flag', explicit: true },
+      rangeUnsatisfiable: true,
+      resolvedIncompatible: false,
+      latestIncompatible: true,
+      maxCompatible: '2.0.0',
+      firstIncompatible: '3.0.0',
+      constraint: '>=20',
+    };
+    const r = decideVerdict({ ...base, name: 'pkg', range: '^3.0.0', runtimeCompat: rc });
+    expect(r.reason).toContain('declares engines node >=20');
+  });
+
+  it('latestIncompatible alone does NOT change the verdict (warning-only)', () => {
+    const rc: RuntimeCompat = { ...badFloor, rangeUnsatisfiable: false };
+    expect(decideVerdict({ ...base, range: '>=0.30,<0.40', runtimeCompat: rc }).verdict).toBe('safe');
+  });
+
+  it('a CVE outranks incompatible; incompatible outranks pinned (with the lockstep tail)', () => {
+    expect(decideVerdict({ ...base, vulns: med, runtimeCompat: badFloor }).verdict).toBe('cve');
+    const r = decideVerdict({
+      ...base,
+      lockstep: { pinned: true, framework: 'Expo', tool: 'npx expo install' },
+      runtimeCompat: badFloor,
+    });
+    expect(r.verdict).toBe('incompatible');
+    expect(r.reason).toContain('framework-pinned (Expo)');
   });
 });
 

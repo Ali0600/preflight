@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import {
   analyze,
+  detectRuntimes,
   evaluatePolicy,
   licenseRisk,
   loadPolicy,
   policyNeeds,
+  runtimeLabel,
   setCacheEnabled,
   toCycloneDX,
   type Finding,
   type Report,
+  type RuntimeName,
   type Verdict,
   type Violation,
 } from '@preflight/core';
@@ -20,6 +24,7 @@ import pc from 'picocolors';
 const BADGE: Record<Verdict, (s: string) => string> = {
   malware: (s) => pc.bgRed(pc.white(pc.bold(` ${s} `))),
   cve: (s) => pc.bgRed(pc.white(` ${s} `)),
+  incompatible: (s) => pc.bgBlue(pc.white(` ${s} `)),
   pinned: (s) => pc.bgYellow(pc.black(` ${s} `)),
   safe: (s) => pc.bgGreen(pc.black(` ${s} `)),
   stale: (s) => pc.bgMagenta(pc.white(` ${s} `)),
@@ -28,11 +33,19 @@ const BADGE: Record<Verdict, (s: string) => string> = {
 const LABEL: Record<Verdict, string> = {
   malware: 'MALWARE',
   cve: 'CVE',
+  incompatible: 'INCOMPAT',
   pinned: 'PINNED',
   safe: 'SAFE',
   stale: 'STALE',
 };
-const ORDER: Record<Verdict, number> = { malware: 0, cve: 1, pinned: 2, stale: 3, safe: 4 };
+const ORDER: Record<Verdict, number> = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5,
+};
 
 const byVerdict = (a: Finding, b: Finding) => ORDER[a.verdict] - ORDER[b.verdict];
 
@@ -46,7 +59,7 @@ function licenseTag(f: Finding): string {
 }
 
 function printFinding(f: Finding): void {
-  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(7));
+  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(8));
   const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
   console.log(
     `${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}${licenseTag(f)}`,
@@ -57,6 +70,15 @@ function printFinding(f: Finding): void {
   }
   if (f.installScript) {
     console.log(`          ${pc.yellow('⚙ runs an install script (code executes on npm install)')}`);
+  }
+  // Early warning: today's install works, but the newest release dropped the target —
+  // the next auto-bump breaks. (When the verdict is already `incompatible`, the reason covers it.)
+  if (f.runtimeCompat?.latestIncompatible && f.verdict !== 'incompatible') {
+    const rc = f.runtimeCompat;
+    const boundary = rc.firstIncompatible ? ` — add an auto-updater ignore for ${rc.firstIncompatible}+` : '';
+    console.log(
+      `          ${pc.yellow(`⏫ newest release drops ${runtimeLabel(rc.target)}${boundary}`)}`,
+    );
   }
   if (f.health !== undefined) {
     const weak = f.healthChecks?.length
@@ -77,11 +99,15 @@ function printReport(r: Report): void {
     ? `${r.total} deps (${direct.length} direct · ${transitive.length} transitive)`
     : `${r.total} deps`;
   const malware = r.summary.malware > 0 ? `${r.summary.malware} malware · ` : '';
+  const incompat = r.summary.incompatible > 0 ? `${r.summary.incompatible} incompatible · ` : '';
   console.log(
     pc.dim(
-      `${counts} · ${malware}${r.summary.cve} CVE · ${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
+      `${counts} · ${malware}${r.summary.cve} CVE · ${incompat}${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
+  if (r.runtimeTarget) {
+    console.log(pc.dim(`target runtime: ${runtimeLabel(r.runtimeTarget, true)}`));
+  }
   const scripts = r.findings.filter((f) => f.installScript).length;
   const suspicious = r.findings.filter((f) => f.suspiciousName).length;
   if (scripts > 0 || suspicious > 0) {
@@ -126,6 +152,14 @@ program
   .option('--sbom [file]', 'emit a CycloneDX SBOM (to <file>, or stdout if omitted)')
   .option('--latest', "fetch each dep's latest version + last-publish date (enables 'stale')")
   .option('--health', "fetch each dep's OpenSSF Scorecard from deps.dev")
+  .option(
+    '--node <version>',
+    'target Node runtime the manifest must install on ("18" = the whole 18.x series)',
+  )
+  .option(
+    '--python <version>',
+    'target Python runtime the manifest must install on ("3.9" = the whole 3.9.x series)',
+  )
   .option('--policy [file]', 'gate the run against a policy file (default ./preflight.config.json)')
   .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
   .action(
@@ -136,6 +170,8 @@ program
         sbom?: boolean | string;
         latest?: boolean;
         health?: boolean;
+        node?: string;
+        python?: string;
         policy?: boolean | string;
         cache?: boolean;
       },
@@ -149,12 +185,30 @@ program
             ? opts.policy
             : 'preflight.config.json';
       const policy = policyFile ? loadPolicy(policyFile) : undefined;
-      const need = policy ? policyNeeds(policy) : { latest: false, health: false };
+      const need = policy ? policyNeeds(policy) : { latest: false, health: false, runtime: false };
+      // Target runtimes, highest precedence first: flags > config `runtimes` (the default
+      // config file counts even without --policy) > version files beside the manifest.
+      const configRuntimes = (policy ?? loadPolicy('preflight.config.json')).runtimes ?? {};
+      const runtimes = detectRuntimes(dirname(path));
+      for (const runtime of ['node', 'python'] as RuntimeName[]) {
+        const flag = opts[runtime];
+        if (flag) {
+          runtimes[runtime] = { runtime, version: flag, source: `--${runtime} flag`, explicit: true };
+        } else if (configRuntimes[runtime]) {
+          runtimes[runtime] = {
+            runtime,
+            version: configRuntimes[runtime]!,
+            source: 'preflight.config.json',
+            explicit: true,
+          };
+        }
+      }
       let report: Report;
       try {
         report = await analyze(path, {
           latest: opts.latest || need.latest,
           health: opts.health || need.health,
+          runtimes,
         });
       } catch (err) {
         console.error(pc.red(`preflight: ${(err as Error).message}`));
@@ -179,8 +233,14 @@ program
         printPolicy(policyFile, violations);
         if (fail) process.exitCode = 1;
       } else {
-        // Default gate: non-zero exit when any dependency carries a CVE or is malicious.
-        if (report.summary.cve > 0 || report.summary.malware > 0) process.exitCode = 1;
+        // Default gate: non-zero exit when any dependency carries a CVE or is malicious —
+        // or cannot install on an *explicitly* declared runtime (auto-detected targets only
+        // warn: a build that was green yesterday shouldn't fail because a .nvmrc was noticed).
+        const explicitIncompat =
+          (report.runtimeTarget?.explicit ?? false) && report.summary.incompatible > 0;
+        if (report.summary.cve > 0 || report.summary.malware > 0 || explicitIncompat) {
+          process.exitCode = 1;
+        }
       }
     },
   );

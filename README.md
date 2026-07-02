@@ -22,14 +22,23 @@ per-package updater break your build.
 - **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
   vector), names that look like **typosquats** of popular packages (fully offline), risky/unknown
   **licenses**, and weak **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
+- **Runtime-compatibility check** — declare the runtime the project actually runs on
+  (`--python 3.9` / `--node 18`, a `runtimes` key in the config, or auto-detected from
+  `.python-version`/`.nvmrc`) and Preflight flags dependencies whose range **cannot install
+  there** (`incompatible`), plus an early warning when the *newest* release dropped your runtime —
+  i.e. the next auto-bump will break. Catches the class of failure CI on a newer interpreter
+  can't: a floor like `uvicorn>=0.49` is green on Python 3.12 but uninstallable on the 3.9 dev
+  machine (`Requires-Python >=3.10`). Data: PyPI `Requires-Python` (hard install failure) and
+  npm `engines` (advisory), per version.
 - **CI-gating** — exits non-zero on any CVE, so it drops straight into a pipeline.
 - **Three delivery surfaces, one engine** — a CLI (built to a standalone bundle with tsup), a
   GitHub Action that gates PRs, and a web dashboard, all reusing `@preflight/core`.
 
 ## Stages
 1. **CLI** (`@preflight/cli`) — `preflight check <manifest>` → a verdict table (`safe` / `pinned` /
-   `cve` / `stale`), with `--latest` (latest version + staleness), `--health` (OpenSSF Scorecard),
-   `--json`, and `--no-cache`. **Working today.**
+   `cve` / `incompatible` / `stale`), with `--latest` (latest version + staleness), `--health`
+   (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility), `--json`, and
+   `--no-cache`. **Working today.**
 2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the changed manifests and posts a
    sticky comment with the verdicts for added/bumped deps; fails the check on a newly-introduced
    CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
@@ -83,12 +92,14 @@ evaluated by `@preflight/core`:
 
 ```json
 {
+  "runtimes": { "python": "3.9" },
   "failOn": {
     "vuln": "kev",
     "installScript": true,
     "suspiciousName": true,
     "license": ["copyleft"],
-    "minHealth": 5
+    "minHealth": 5,
+    "runtime": "incompatible"
   }
 }
 ```
@@ -97,6 +108,11 @@ evaluated by `@preflight/core`:
 - `installScript` / `suspiciousName` — fail on a dep that runs an install script / has a typosquat-like name.
 - `license` — fail on these license ids, or the buckets `"copyleft"` / `"unknown"`.
 - `minHealth` — fail if a *direct* dep's OpenSSF score is below this.
+- `runtime` — `"incompatible"` fails when a dep's range cannot install on the target runtime
+  (declared in `runtimes` or via flags); `"latest-dropped"` also fails the early warning (the
+  newest release dropped the runtime, so the next bump breaks). Without a policy, an explicit
+  `--node`/`--python` target failing to install exits non-zero; auto-detected targets
+  (`.nvmrc`/`.python-version`) only warn.
 
 Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
 need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.

@@ -73,11 +73,52 @@ describe('evaluatePolicy', () => {
   });
 });
 
+describe('evaluatePolicy — runtime rule', () => {
+  const rc = {
+    target: { runtime: 'python' as const, version: '3.9', source: '--python flag', explicit: true },
+    rangeUnsatisfiable: false,
+    resolvedIncompatible: false,
+    latestIncompatible: true,
+    maxCompatible: '0.39.0',
+    firstIncompatible: '0.40.0',
+    constraint: '>=3.10',
+  };
+
+  it("'incompatible' fails on broken range/lock, not on latest-dropped alone", () => {
+    const broken = finding({
+      name: 'uvicorn',
+      verdict: 'incompatible',
+      reason: 'No version installs',
+      runtimeCompat: { ...rc, rangeUnsatisfiable: true },
+    });
+    const warned = finding({ name: 'fastapi', runtimeCompat: rc });
+    const policy: Policy = { failOn: { runtime: 'incompatible' } };
+    const r = evaluatePolicy([broken, warned], policy);
+    expect(r.fail).toBe(true);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]).toMatchObject({ rule: 'runtime', dep: 'uvicorn@1.0.0' });
+  });
+
+  it("'latest-dropped' also fails the early warning, naming the ignore boundary", () => {
+    const warned = finding({ name: 'fastapi', runtimeCompat: rc });
+    const r = evaluatePolicy([warned], { failOn: { runtime: 'latest-dropped' } });
+    expect(r.fail).toBe(true);
+    expect(r.violations[0].detail).toContain('Python 3.9');
+    expect(r.violations[0].detail).toContain('0.40.0');
+  });
+
+  it('no runtimeCompat data -> no violation', () => {
+    const r = evaluatePolicy([finding({ name: 'clean' })], { failOn: { runtime: 'incompatible' } });
+    expect(r.fail).toBe(false);
+  });
+});
+
 describe('policyNeeds', () => {
-  it('asks for latest only for license rules and health only for min-health', () => {
-    expect(policyNeeds({ failOn: { license: ['MIT'] } })).toEqual({ latest: true, health: false });
-    expect(policyNeeds({ failOn: { minHealth: 5 } })).toEqual({ latest: false, health: true });
-    expect(policyNeeds({ failOn: { suspiciousName: true } })).toEqual({ latest: false, health: false });
+  it('asks for latest only for license rules, health for min-health, runtime for runtime', () => {
+    expect(policyNeeds({ failOn: { license: ['MIT'] } })).toEqual({ latest: true, health: false, runtime: false });
+    expect(policyNeeds({ failOn: { minHealth: 5 } })).toEqual({ latest: false, health: true, runtime: false });
+    expect(policyNeeds({ failOn: { suspiciousName: true } })).toEqual({ latest: false, health: false, runtime: false });
+    expect(policyNeeds({ failOn: { runtime: 'incompatible' } })).toEqual({ latest: false, health: false, runtime: true });
   });
 });
 
