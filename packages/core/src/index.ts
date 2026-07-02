@@ -21,6 +21,15 @@ export { fetchRuntimeMeta, fetchRuntimeMetaAll, type RuntimeMeta } from './runti
 export { computeRuntimeCompat } from './runtime-compat';
 export { detectRuntimes } from './runtime-detect';
 export {
+  buildPlan,
+  frameworkSet,
+  type LockstepAdvice,
+  type PackagePlan,
+  type Plan,
+  type PlanRequest,
+} from './plan';
+export { renderDependabot, renderManifest, trimBoundary, type Artifact } from './artifacts';
+export {
   compareSemver,
   parseSemver,
   rangeAdmitsSeries,

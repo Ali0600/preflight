@@ -77,6 +77,39 @@ Example (a pip manifest with old pins — CI would fail on these):
  SAFE    rich@13.7.1  · latest 15.0.0   Independent — safe to auto-update (CI-gated)
 ```
 
+## Design-phase mode: `preflight plan`
+
+The checks above catch problems in an *existing* manifest. `preflight plan` moves them to the
+**start of a project** — pick the runtime the app will actually run on (and optionally a
+framework), list the packages you intend to use, and get the newest versions that install
+there plus the generated guardrails:
+
+```bash
+npm run plan -- --python 3.9 fastapi uvicorn httpx --dev pytest
+npm run plan -- --node 18 --framework expo axios
+npm run plan -- --python 3.9 fastapi --write my-app   # write the files
+```
+
+```
+uvicorn@0.39.0 (latest 0.49.0 incompatible)
+    0.40.0+ requires Python >=3.10 — capped
+
+── requirements.txt ──
+uvicorn>=0.39.0,<0.40    # 0.40.0+ requires Python >=3.10 — capped
+
+── .github/dependabot.yml ──
+    ignore:
+      # These ranges dropped Python 3.9 — don't bump past them.
+      - dependency-name: uvicorn
+        versions: ['>=0.40']
+```
+
+It emits the manifest (`requirements.txt` / `package.json` with an `engines` field) and a
+`dependabot.yml` with grouped weekly updates, an `ignore` at each runtime boundary, and — with
+`--framework` — the whole lockstep set ignored ("update with `npx expo install`, not
+per-package bumps"). Recommended versions are OSV-checked, so a floor that would pin onto a
+known CVE is flagged in the plan.
+
 ## How it works
 `@preflight/core` is the single engine: `manifest` → `osv` + `lockstep` (+ `registry`/`depsdev`)
 → `verdict` → `Report`. The CLI, Action, and dashboard are thin wrappers over `analyze()`.
