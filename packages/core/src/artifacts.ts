@@ -97,6 +97,15 @@ export function renderDependabot(plan: Plan): Artifact {
     for (const name of advice.members) lines.push(`      - dependency-name: ${quote(name)}`);
     for (const prefix of advice.prefixes) lines.push(`      - dependency-name: ${quote(`${prefix}*`)}`);
   }
+
+  // Any repo using this file will also have workflows — keep the actions fresh too
+  // (they version independently of the npm/pip tree, so no ignore rules apply).
+  lines.push(
+    '  - package-ecosystem: github-actions',
+    '    directory: /',
+    '    schedule:',
+    '      interval: weekly',
+  );
   return { filename: '.github/dependabot.yml', content: lines.join('\n') + '\n' };
 }
 

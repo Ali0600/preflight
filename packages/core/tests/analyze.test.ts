@@ -34,10 +34,18 @@ describe('analyzeFiles', () => {
     });
     // the lockfile's transitive entry is picked up too
     expect(report.findings.find((f) => f.name === 'deep-dep')?.direct).toBe(false);
+    expect(report.lockfile).toBe(true);
   });
 
   it('throws when no manifest is among the files', async () => {
     await expect(analyzeFiles({ 'README.md': '# hi' })).rejects.toThrow(/No package\.json/);
+  });
+
+  it('flags a lockfile-less npm scan (direct deps only) so callers can warn (#23)', async () => {
+    const report = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.3.0' } }),
+    });
+    expect(report.lockfile).toBe(false);
   });
 
   it('react next to `next` (no expo) is not framework-pinned (#18)', async () => {

@@ -1,7 +1,7 @@
 import type { Plan } from '@preflight/core';
 import { describe, expect, it } from 'vitest';
 
-import { renderPlanRow, renderPlanText } from '../src/plan';
+import { renderPlanRow, renderPlanText, splitPackages } from '../src/plan';
 
 const PLAN: Plan = {
   ecosystem: 'PyPI',
@@ -38,6 +38,18 @@ const PLAN: Plan = {
     dependabot: { filename: '.github/dependabot.yml', content: 'version: 2\n' },
   },
 };
+
+describe('splitPackages (#19: --dev must take every following package)', () => {
+  it('flattens variadic values and tolerates commas and blanks', () => {
+    expect(splitPackages(['typescript', '@types/node', 'eslint'])).toEqual([
+      'typescript',
+      '@types/node',
+      'eslint',
+    ]);
+    expect(splitPackages(['a,b', 'c', ' ', ''])).toEqual(['a', 'b', 'c']);
+    expect(splitPackages(undefined)).toEqual([]);
+  });
+});
 
 describe('renderPlanRow', () => {
   it('shows the recommended pin and why the latest was skipped', () => {
