@@ -2,9 +2,12 @@ import type { Finding, Report, Verdict } from '@preflight/core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  depKey,
   diffDeclared,
+  introducedKeys,
   newCveCount,
   renderComment,
+  renderPolicySection,
   renderRepoIssue,
   shouldFail,
   ISSUE_MARKER,
@@ -31,6 +34,13 @@ function report(findings: Finding[]): Report {
   return { ecosystem: 'npm', path: 'package.json', total: findings.length, findings, summary };
 }
 
+/** ManifestReport with sane defaults; `introduced` defaults to empty (nothing new). */
+function mr(over: Partial<ManifestReport> & { report: Report }): ManifestReport {
+  return { path: 'package.json', changes: new Map(), introduced: new Set(), ...over };
+}
+
+const keysOf = (...fs: Finding[]) => new Set(fs.map(depKey));
+
 describe('diffDeclared', () => {
   it('marks added and bumped deps, ignores unchanged', () => {
     const base = [{ name: 'a', range: '^1' }];
@@ -49,27 +59,59 @@ describe('diffDeclared', () => {
   });
 });
 
+describe('introducedKeys (the tree diff the gate runs on)', () => {
+  it('flags added and re-resolved packages by name@version; unchanged ones are not introduced', () => {
+    const base = [
+      { name: 'a', range: '^1.0.0', version: '1.0.0' }, // unchanged
+      { name: 'deep', range: '', version: '2.0.0' }, // will be re-resolved to 2.1.0
+    ];
+    const head = [
+      finding('a', 'safe'),
+      { ...finding('deep', 'cve'), range: '', version: '2.1.0', direct: false },
+      finding('brand-new', 'safe'),
+    ];
+    const introduced = introducedKeys(base, head);
+    expect(introduced.has('a@1.0.0')).toBe(false);
+    expect(introduced.has('deep@2.1.0')).toBe(true); // transitive bump counts
+    expect(introduced.has('brand-new@1.0.0')).toBe(true);
+  });
+
+  it('an empty base tree (manifest added in this PR) introduces everything', () => {
+    expect(introducedKeys([], [finding('a', 'safe')]).size).toBe(1);
+  });
+});
+
 describe('newCveCount', () => {
-  it('counts only added/bumped deps that carry a CVE', () => {
-    const r = report([finding('a', 'cve'), finding('b', 'cve'), finding('c', 'safe')]);
-    const changes = new Map([
-      ['a', 'added'],
-      ['c', 'added'],
-    ] as const);
-    // `b` has a CVE but isn't part of this PR's changes → not counted.
-    expect(newCveCount([{ path: 'package.json', report: r, changes }])).toBe(1);
+  it('counts only introduced deps that carry a CVE — at any depth', () => {
+    const a = finding('a', 'cve');
+    const b = finding('b', 'cve'); // pre-existing → not counted
+    const deep = { ...finding('deep', 'cve'), direct: false as const };
+    const r = report([a, b, deep, finding('c', 'safe')]);
+    const result = mr({
+      report: r,
+      changes: new Map([['a', 'added']] as const),
+      introduced: keysOf(a, deep),
+    });
+    expect(newCveCount([result])).toBe(2); // direct a + transitive deep; b excluded
+  });
+
+  it('counts introduced malware too', () => {
+    const mal = { ...finding('evil', 'malware'), direct: false as const };
+    expect(newCveCount([mr({ report: report([mal]), introduced: keysOf(mal) })])).toBe(1);
   });
 });
 
 describe('renderComment', () => {
-  const withCve: ManifestReport = {
-    path: 'package.json',
-    report: report([finding('left-pad', 'cve'), finding('untouched', 'cve'), finding('ok', 'safe')]),
+  const lp = finding('left-pad', 'cve');
+  const ok = finding('ok', 'safe');
+  const withCve: ManifestReport = mr({
+    report: report([lp, finding('untouched', 'cve'), ok]),
     changes: new Map([
       ['left-pad', 'added'],
       ['ok', 'added'],
     ] as const),
-  };
+    introduced: keysOf(lp, ok),
+  });
 
   it('includes the marker and only the changed deps', () => {
     const body = renderComment([withCve]);
@@ -107,35 +149,88 @@ describe('renderComment', () => {
       },
     };
     const body = renderComment([
-      {
+      mr({
         path: 'requirements.txt',
         report: report([broken, warned]),
         changes: new Map([
           ['uvicorn', 'added'],
           ['fastapi', 'added'],
         ] as const),
-      },
+        introduced: keysOf(broken, warned),
+      }),
     ]);
     expect(body).toContain('| ⛔ INCOMPAT |');
     expect(body).toContain('⏫ newest release drops Python 3.9'); // on the safe row only
   });
 
   it('says all-clear when changed deps are clean', () => {
-    const clean: ManifestReport = {
-      path: 'package.json',
-      report: report([finding('ok', 'safe')]),
+    const clean = mr({
+      report: report([ok]),
       changes: new Map([['ok', 'added']] as const),
-    };
+      introduced: keysOf(ok),
+    });
     expect(renderComment([clean])).toContain('No new CVEs introduced');
   });
 
   it('handles a PR that changed a manifest but no deps', () => {
-    const noChanges: ManifestReport = {
-      path: 'package.json',
-      report: report([finding('ok', 'safe')]),
-      changes: new Map(),
-    };
+    const noChanges = mr({ report: report([finding('ok', 'safe')]) });
     expect(renderComment([noChanges])).toContain('No added or bumped dependencies');
+  });
+});
+
+describe('renderComment — BUG-3: transitive findings the PR introduces are gated, not demoted', () => {
+  it('lists an introduced transitive CVE and flips the footer to ❌', () => {
+    // The NutriDex shape: the direct dep is clean, but its lockfile entry vendors a CVE.
+    const next = finding('next', 'safe', '16.2.10');
+    const postcss = { ...finding('postcss', 'cve', '8.4.31'), range: '', direct: false as const };
+    const r = mr({
+      report: report([next, postcss]),
+      changes: new Map([['next', 'added']] as const),
+      introduced: keysOf(next, postcss),
+    });
+    const body = renderComment([r]);
+    expect(body).toContain('Transitive findings introduced by this PR — 1');
+    expect(body).toContain('postcss@8.4.31');
+    expect(body).toContain('❌');
+    expect(body).not.toContain('✅ **No new CVEs');
+    expect(shouldFail([r], 'cve')).toBe(true); // the gate agrees with the comment
+  });
+
+  it('renders a lockfile-only PR (no declared changes) and still gates it', () => {
+    const deep = { ...finding('minimist', 'cve'), direct: false as const };
+    const r = mr({ report: report([deep]), introduced: keysOf(deep) });
+    const body = renderComment([r]);
+    expect(body).toContain('lockfile change');
+    expect(body).toContain('minimist');
+    expect(newCveCount([r])).toBe(1);
+  });
+
+  it('keeps pre-existing transitive CVEs informational — with correct grammar', () => {
+    const oldVuln = { ...finding('old-vuln', 'cve'), direct: false as const };
+    const okDep = finding('ok', 'safe');
+    const r = mr({
+      report: report([okDep, oldVuln]),
+      changes: new Map([['ok', 'added']] as const),
+      introduced: keysOf(okDep),
+    });
+    const body = renderComment([r]);
+    expect(body).toContain('1 pre-existing transitive dependency carries known CVEs');
+    expect(body).toContain('not introduced here');
+    expect(body).toContain('✅ **No new CVEs introduced'); // the PR itself is clean
+    expect(shouldFail([r], 'cve')).toBe(false);
+  });
+});
+
+describe('renderPolicySection', () => {
+  it('stays empty with no violations and no suppressions', () => {
+    expect(renderPolicySection([])).toBe('');
+  });
+
+  it('surfaces allow-list suppressions so exemptions are never silent', () => {
+    expect(renderPolicySection([], 2)).toContain('2 would-be violation(s) suppressed');
+    const withBoth = renderPolicySection([{ rule: 'vuln', dep: 'x@1', detail: 'd' }], 1);
+    expect(withBoth).toContain('Policy violations');
+    expect(withBoth).toContain('1 would-be violation(s) suppressed');
   });
 });
 
@@ -161,7 +256,7 @@ describe('renderRepoIssue (scheduled scan)', () => {
   });
 });
 
-describe('shouldFail (fail-level)', () => {
+describe('shouldFail (fail-level, over what the PR introduces)', () => {
   const cveFinding = (name: string, vuln: Partial<Finding['vulns'][number]>): Finding => ({
     name,
     range: '^1',
@@ -172,14 +267,18 @@ describe('shouldFail (fail-level)', () => {
     verdict: 'cve',
     reason: 'cve',
   });
-  const result = (f: Finding): ManifestReport => ({
-    path: 'package.json',
-    report: report([f]),
-    changes: new Map([[f.name, 'added']] as const),
-  });
+  const result = (f: Finding): ManifestReport =>
+    mr({ report: report([f]), changes: new Map([[f.name, 'added']] as const), introduced: keysOf(f) });
 
   it("'cve' fails on any new CVE", () => {
     expect(shouldFail([result(cveFinding('a', {}))], 'cve')).toBe(true);
+  });
+
+  it("'cve' fails on an introduced *transitive* CVE too (BUG-3)", () => {
+    const deep = { ...cveFinding('deep', {}), direct: false as const };
+    expect(shouldFail([mr({ report: report([deep]), introduced: keysOf(deep) })], 'cve')).toBe(true);
+    // …but not on a pre-existing one the PR didn't touch
+    expect(shouldFail([mr({ report: report([deep]) })], 'cve')).toBe(false);
   });
 
   it("'kev' fails only on a confirmed-exploited CVE", () => {

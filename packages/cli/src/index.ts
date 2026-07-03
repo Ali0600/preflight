@@ -130,13 +130,15 @@ function printReport(r: Report): void {
   console.log();
 }
 
-function printPolicy(file: string, violations: Violation[]): void {
+function printPolicy(file: string, violations: Violation[], suppressed: number): void {
   // To stderr, so it never pollutes --json / --sbom stdout.
+  // The allow list must stay visible — an exemption that hides itself becomes a blind spot.
+  const allowNote = suppressed > 0 ? pc.dim(` · ${suppressed} suppressed by allow list`) : '';
   if (violations.length === 0) {
-    console.error(pc.green(`\n✓ policy ok (${file})`));
+    console.error(pc.green(`\n✓ policy ok (${file})`) + allowNote);
     return;
   }
-  console.error(pc.red(`\n✗ ${violations.length} policy violation(s) (${file}):`));
+  console.error(pc.red(`\n✗ ${violations.length} policy violation(s) (${file})`) + allowNote + pc.red(':'));
   for (const v of violations) console.error(pc.red(`  · ${v.rule}: ${v.dep} — ${v.detail}`));
 }
 
@@ -231,8 +233,8 @@ program
         printReport(report);
       }
       if (policy && policyFile) {
-        const { violations, fail } = evaluatePolicy(report.findings, policy);
-        printPolicy(policyFile, violations);
+        const { violations, fail, suppressed } = evaluatePolicy(report.findings, policy);
+        printPolicy(policyFile, violations, suppressed);
         if (fail) process.exitCode = 1;
       } else {
         // Default gate: non-zero exit when any dependency carries a CVE or is malicious —

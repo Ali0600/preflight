@@ -1,7 +1,8 @@
 {
   "failOn": {
     "vuln": "kev",
-    "installScript": false,
+    "installScript": true,
     "suspiciousName": true
-  }
+  },
+  "allow": ["esbuild", "fsevents", "sharp"]
 }

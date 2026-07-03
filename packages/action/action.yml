@@ -22,7 +22,7 @@ inputs:
     required: false
     default: 'pr'
   policy-file:
-    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level, runtime — instead of fail-level.'
+    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level, runtime — instead of fail-level. In PR mode the rules apply to everything the PR introduces, direct and transitive; `allow` entries exempt adjudicated packages/advisories.'
     required: false
     default: ''
   node-version:
@@ -34,5 +34,6 @@ inputs:
     required: false
     default: ''
 runs:
-  using: 'node20'
+  # node20 is deprecated on GitHub runners (they force Node 24 with a warning) — see issue #24.
+  using: 'node24'
   main: 'dist/index.js'

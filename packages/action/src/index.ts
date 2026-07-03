@@ -1,5 +1,6 @@
-import { readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
@@ -8,6 +9,7 @@ import {
   detectRuntimes,
   evaluatePolicy,
   loadPolicy,
+  parseManifest,
   parseManifestContent,
   policyNeeds,
   toSarif,
@@ -20,6 +22,8 @@ import {
 
 import {
   diffDeclared,
+  introducedFindings,
+  introducedKeys,
   newCveCount,
   renderComment,
   renderPolicySection,
@@ -32,6 +36,9 @@ import {
 
 // package.json or requirements*.txt, anywhere in the tree.
 const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
+// A lockfile-only change still moves the installed tree (transitive adds/bumps) —
+// it must trigger the scan of its sibling manifest too (dogfood BUG-3).
+const LOCKFILE = /(^|\/)package-lock\.json$/i;
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
@@ -92,9 +99,16 @@ async function runPrScan(
     pull_number: issue_number,
     per_page: 100,
   });
-  const manifests = files.filter((f) => f.status !== 'removed' && MANIFEST.test(f.filename));
-  if (manifests.length === 0) {
-    core.info('No dependency manifests changed in this PR.');
+  // Manifests touched directly, plus the sibling manifest of any touched lockfile —
+  // a lockfile-only PR (npm audit fix, transitive bump) changes the tree just the same.
+  const manifestPaths = new Set<string>();
+  for (const f of files) {
+    if (f.status === 'removed') continue;
+    if (MANIFEST.test(f.filename)) manifestPaths.add(f.filename);
+    else if (LOCKFILE.test(f.filename)) manifestPaths.add(join(dirname(f.filename), 'package.json'));
+  }
+  if (manifestPaths.size === 0) {
+    core.info('No dependency manifests or lockfiles changed in this PR.');
     return;
   }
 
@@ -104,14 +118,18 @@ async function runPrScan(
     runtimes: resolveRuntimes(policy),
   };
   const results: ManifestReport[] = [];
-  for (const f of manifests) {
-    const path = f.filename;
+  for (const path of manifestPaths) {
     try {
       const report = await analyze(path, analyzeOpts); // head: checked-out file (+ lockfile) → OSV
-      const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      // Diff only the declared (direct) deps — the report also contains the transitive graph.
-      const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
-      if (changes.size > 0) results.push({ path, report, changes });
+      const baseTree = await fetchBaseTree(octokit, owner, repo, path, baseSha);
+      // Two diffs with different jobs: `changes` = declared (manifest) edits for the comment
+      // table; `introduced` = the full-tree name@version diff the gate + policy evaluate.
+      const changes = diffDeclared(
+        baseTree.filter((d) => d.direct !== false),
+        report.findings.filter((d) => d.direct !== false),
+      );
+      const introduced = introducedKeys(baseTree, report.findings);
+      if (changes.size > 0 || introduced.size > 0) results.push({ path, report, changes, introduced });
     } catch (err) {
       core.warning(`Skipped ${path}: ${(err as Error).message}`);
     }
@@ -123,20 +141,18 @@ async function runPrScan(
     return;
   }
 
-  // Evaluate the policy (if any) against the deps this PR added/bumped.
-  const changedFindings = results.flatMap((r) =>
-    r.report.findings.filter((d) => d.direct !== false && r.changes.has(d.name)),
-  );
+  // Evaluate the policy (if any) against everything this PR introduces — direct AND
+  // transitive — so the check that protects main enforces what the CLI enforces locally.
   const policyResult = policy
-    ? evaluatePolicy(changedFindings, policy)
-    : { violations: [], fail: false };
+    ? evaluatePolicy(results.flatMap(introducedFindings), policy)
+    : { violations: [], fail: false, suppressed: 0 };
 
   await upsertComment(
     octokit,
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations),
+    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed),
   );
   core.setOutput('new-cves', newCveCount(results));
 
@@ -202,8 +218,31 @@ function findManifests(root: string): string[] {
   return out;
 }
 
-/** Declared deps of the manifest at the PR base, or [] if it's new/unreadable. */
-async function fetchBaseDeps(
+/** A file's raw text at a ref. `undefined` on 404 (normal: file doesn't exist at base);
+ * other failures warn — a silently-missing base would make everything look "introduced". */
+async function fetchBaseFile(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | undefined> {
+  try {
+    // raw media type: response body is the file text (also the only way past the 1 MB
+    // base64 cap of the JSON format — real lockfiles routinely exceed it).
+    const res = await octokit.rest.repos.getContent({ owner, repo, path, ref, mediaType: { format: 'raw' } });
+    return typeof res.data === 'string' ? res.data : undefined;
+  } catch (err) {
+    if ((err as { status?: number }).status !== 404) {
+      core.warning(`Could not read base ${path}@${ref.slice(0, 7)}: ${(err as Error).message}`);
+    }
+    return undefined;
+  }
+}
+
+/** The FULL dependency tree at the PR base: manifest + sibling lockfile, parsed offline in a
+ * temp dir so the lockfile graph enumerates. [] when the manifest is new in this PR. */
+async function fetchBaseTree(
   octokit: Octokit,
   owner: string,
   repo: string,
@@ -211,16 +250,23 @@ async function fetchBaseDeps(
   ref: string | undefined,
 ): Promise<Dependency[]> {
   if (!ref) return [];
+  const manifest = await fetchBaseFile(octokit, owner, repo, path, ref);
+  if (manifest === undefined) return []; // added in this PR → every dep is introduced
+  if (!/package\.json$/i.test(path)) return parseManifestContent(path, manifest).dependencies;
+
+  const dir = mkdtempSync(join(tmpdir(), 'preflight-base-'));
   try {
-    const res = await octokit.rest.repos.getContent({ owner, repo, path, ref });
-    const data = res.data as { content?: string; encoding?: string };
-    if (!data.content) return [];
-    const content = Buffer.from(data.content, (data.encoding as BufferEncoding) ?? 'base64').toString(
-      'utf8',
-    );
-    return parseManifestContent(path, content).dependencies;
-  } catch {
-    return []; // 404 => manifest added in this PR; treat every dep as new
+    writeFileSync(join(dir, 'package.json'), manifest);
+    const lock = await fetchBaseFile(octokit, owner, repo, join(dirname(path), 'package-lock.json'), ref);
+    if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
+    return parseManifest(join(dir, 'package.json')).dependencies;
+  } catch (err) {
+    // e.g. an unparsable base lockfile — fall back to the declared deps so the diff degrades
+    // loudly (transitives all count as introduced) instead of silently gating nothing.
+    core.warning(`Base tree for ${path} incomplete (${(err as Error).message}) — diffing declared deps only.`);
+    return parseManifestContent(path, manifest).dependencies;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

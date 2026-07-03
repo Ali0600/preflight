@@ -8,12 +8,14 @@ import {
 
 // Pure presentation/diff logic — no @actions/* imports, so it's unit-testable on its own.
 
-/** A "⛔ Policy violations" markdown section for the PR comment, or '' when there are none. */
-export function renderPolicySection(violations: Violation[]): string {
-  if (violations.length === 0) return '';
+/** A "⛔ Policy violations" markdown section for the PR comment, or '' when there are none.
+ * `suppressed` (allow-listed would-be violations) is surfaced so exemptions are never silent. */
+export function renderPolicySection(violations: Violation[], suppressed = 0): string {
+  const note = suppressed > 0 ? ['', `_${suppressed} would-be violation(s) suppressed by the policy \`allow\` list._`] : [];
+  if (violations.length === 0) return note.join('\n');
   const lines = ['', '### ⛔ Policy violations', '', '| Rule | Package | Detail |', '| --- | --- | --- |'];
   for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
-  return lines.join('\n');
+  return lines.concat(note).join('\n');
 }
 
 export type ChangeStatus = 'added' | 'bumped';
@@ -57,8 +59,23 @@ const ORDER: Record<Verdict, number> = {
 export interface ManifestReport {
   path: string;
   report: Report;
-  /** dep name -> how it changed in this PR (only added/bumped deps are flagged). */
+  /** dep name -> how its *declared* (manifest) entry changed — drives the direct-deps table. */
   changes: Map<string, ChangeStatus>;
+  /** `name@version` keys — direct AND transitive — absent from the base tree: everything this
+   * PR actually introduces. THIS is what the gate + policy evaluate (the dogfood BUG-3 fix:
+   * the old gate looked at `changes` only, so a CVE arriving via the lockfile sailed through). */
+  introduced: Set<string>;
+}
+
+/** The identity a dependency has in a tree diff: its resolved version when known, else its range. */
+export function depKey(d: { name: string; version?: string; range: string }): string {
+  return `${d.name}@${d.version ?? d.range}`;
+}
+
+/** `name@version` keys in `head` (the scanned findings) that don't exist in the base tree. */
+export function introducedKeys(base: { name: string; version?: string; range: string }[], head: Report['findings']): Set<string> {
+  const baseKeys = new Set(base.map(depKey));
+  return new Set(head.filter((f) => !baseKeys.has(depKey(f))).map(depKey));
 }
 
 /** Declared-dependency diff between a base and head manifest (by name + range). */
@@ -72,12 +89,17 @@ export function diffDeclared(base: Declared[], head: Declared[]): Map<string, Ch
   return changes;
 }
 
-/** Number of added/bumped direct deps that carry a CVE — i.e. CVEs this PR newly introduces. */
+/** Findings (any depth) this PR introduces, per manifest. */
+export function introducedFindings({ report, introduced }: ManifestReport) {
+  return report.findings.filter((f) => introduced.has(depKey(f)));
+}
+
+/** Introduced deps — direct or transitive — that carry a CVE/malicious advisory. */
 export function newCveCount(results: ManifestReport[]): number {
   let n = 0;
-  for (const { report, changes } of results) {
-    for (const f of report.findings) {
-      if (f.direct !== false && changes.has(f.name) && f.verdict === 'cve') n += 1;
+  for (const r of results) {
+    for (const f of introducedFindings(r)) {
+      if (f.verdict === 'cve' || f.verdict === 'malware') n += 1;
     }
   }
   return n;
@@ -90,20 +112,19 @@ function changedFindings({ report, changes }: ManifestReport) {
     .sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
 }
 
-/** Whether the gate should fail, given the configured level — over the deps this PR changed.
+/** Whether the gate should fail, given the configured level — over everything the PR introduces
+ * (direct + transitive), so it matches what the CLI would fail on for the same tree change.
  * The level semantics (malware/cve/kev/epss:x) live in core's `meetsVulnLevel`, shared with the CLI. */
 export function shouldFail(results: ManifestReport[], level: string): boolean {
-  return results.some(({ report, changes }) =>
-    report.findings.some(
-      (f) => f.direct !== false && changes.has(f.name) && meetsVulnLevel(f, level),
-    ),
-  );
+  return results.some((r) => introducedFindings(r).some((f) => meetsVulnLevel(f, level)));
 }
 
-/** Transitive (indirect) deps anywhere in the scanned tree that carry a CVE. */
-function transitiveCves(results: ManifestReport[]) {
+/** Transitive CVE carriers that were ALREADY in the base tree — informational, not this PR's doing. */
+function preexistingTransitiveCves(results: ManifestReport[]) {
   return results.flatMap((r) =>
-    r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0),
+    r.report.findings.filter(
+      (f) => f.direct === false && f.vulns.length > 0 && !r.introduced.has(depKey(f)),
+    ),
   );
 }
 
@@ -132,49 +153,86 @@ export function renderRepoIssue(reports: Report[]): { body: string; count: numbe
   return { body: lines.join('\n'), count };
 }
 
+/** Rows shown for introduced-transitive findings before collapsing to "+N more". */
+const TRANSITIVE_ROWS = 10;
+
 /** Render the full sticky PR comment (Markdown). Returns just the body. */
 export function renderComment(results: ManifestReport[]): string {
-  const withChanges = results.filter((r) => r.changes.size > 0);
+  // A manifest is worth a section when its declared deps changed OR the tree changed
+  // (a lockfile-only PR has changes.size === 0 but still introduces packages).
+  const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
   const lines = [MARKER, '## ✈️ Preflight — dependency check', ''];
 
-  if (withChanges.length === 0) {
+  if (active.length === 0) {
     lines.push('No added or bumped dependencies in this PR. ✅');
     return lines.join('\n');
   }
 
-  for (const r of withChanges) {
+  for (const r of active) {
     const findings = changedFindings(r);
-    const cves = findings.filter((f) => f.verdict === 'cve').length;
-    const summary = cves > 0 ? ` · 🟥 ${cves} CVE` : '';
-    lines.push(`### \`${r.path}\` — ${findings.length} added/bumped${summary}`, '');
-    lines.push('| Verdict | Package | Change | Note |', '| --- | --- | --- | --- |');
-    for (const f of findings) {
-      const ver = f.version ?? f.range;
-      const nextBumpBreaks =
-        f.runtimeCompat?.latestIncompatible && f.verdict !== 'incompatible'
-          ? `⏫ newest release drops ${runtimeLabel(f.runtimeCompat.target)}`
-          : '';
-      const flags = [
-        f.installScript ? '⚙ install script' : '',
-        f.suspiciousName ? `⚠ resembles \`${f.suspiciousName.similarTo}\`` : '',
-        nextBumpBreaks,
-        f.license ? `· ${f.license}` : '',
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const note = flags ? `${f.reason} ${flags}` : f.reason;
+    const introducedTransitive = introducedFindings(r).filter((f) => f.direct === false);
+    const transitiveRisky = introducedTransitive
+      .filter((f) => f.vulns.length > 0)
+      .sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+
+    if (findings.length > 0) {
+      const cves = findings.filter((f) => f.verdict === 'cve').length;
+      const summary = cves > 0 ? ` · 🟥 ${cves} CVE` : '';
+      lines.push(`### \`${r.path}\` — ${findings.length} added/bumped${summary}`, '');
+      lines.push('| Verdict | Package | Change | Note |', '| --- | --- | --- | --- |');
+      for (const f of findings) {
+        const ver = f.version ?? f.range;
+        const nextBumpBreaks =
+          f.runtimeCompat?.latestIncompatible && f.verdict !== 'incompatible'
+            ? `⏫ newest release drops ${runtimeLabel(f.runtimeCompat.target)}`
+            : '';
+        const flags = [
+          f.installScript ? '⚙ install script' : '',
+          f.suspiciousName ? `⚠ resembles \`${f.suspiciousName.similarTo}\`` : '',
+          nextBumpBreaks,
+          f.license ? `· ${f.license}` : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const note = flags ? `${f.reason} ${flags}` : f.reason;
+        lines.push(
+          `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`,
+        );
+      }
+      lines.push('');
+    } else {
+      // Lockfile-only change: no declared edits, but the installed tree moved.
       lines.push(
-        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`,
+        `### \`${r.path}\` — lockfile change · ${r.introduced.size} package(s) introduced or re-resolved`,
+        '',
       );
     }
-    lines.push('');
+
+    if (transitiveRisky.length > 0) {
+      lines.push(
+        `#### 🔎 Transitive findings introduced by this PR — ${transitiveRisky.length}`,
+        '',
+        '| Verdict | Package | Note |',
+        '| --- | --- | --- |',
+      );
+      for (const f of transitiveRisky.slice(0, TRANSITIVE_ROWS)) {
+        lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\` | ${f.reason} |`);
+      }
+      if (transitiveRisky.length > TRANSITIVE_ROWS) {
+        lines.push(`| … | _+${transitiveRisky.length - TRANSITIVE_ROWS} more_ | see the SARIF upload / run the CLI |`);
+      }
+      lines.push('');
+    } else if (findings.length === 0) {
+      lines.push('None of the introduced packages carry known CVEs. ✅', '');
+    }
   }
 
-  const transitive = transitiveCves(results);
-  if (transitive.length > 0) {
-    const names = [...new Set(transitive.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+  const preexisting = preexistingTransitiveCves(results);
+  if (preexisting.length > 0) {
+    const names = [...new Set(preexisting.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+    const noun = preexisting.length === 1 ? 'dependency carries' : 'dependencies carry';
     lines.push(
-      `🔎 ${transitive.length} transitive ${transitive.length === 1 ? 'dependency' : 'dependencies'} in the tree carry known CVEs: ${names.join(', ')}${transitive.length > names.length ? ', …' : ''}`,
+      `🔎 ${preexisting.length} pre-existing transitive ${noun} known CVEs (already in the base tree — not introduced here): ${names.join(', ')}${preexisting.length > names.length ? ', …' : ''}`,
       '',
     );
   }
@@ -183,8 +241,8 @@ export function renderComment(results: ManifestReport[]): string {
   lines.push('---');
   lines.push(
     newCves > 0
-      ? `❌ **This PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE.**`
-      : '✅ **No new CVEs introduced.**',
+      ? `❌ **This PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE or malicious advisory (direct and transitive counted).**`
+      : '✅ **No new CVEs introduced (direct and transitive checked).**',
   );
   return lines.join('\n');
 }

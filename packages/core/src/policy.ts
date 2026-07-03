@@ -24,6 +24,13 @@ export interface Policy {
      * dropped it (the next auto-bump would break). */
     runtime?: 'incompatible' | 'latest-dropped';
   };
+  /** Adjudicated exemptions from `failOn`: a package name ("esbuild" — any version), an exact
+   * pin ("esbuild@0.28.1" — stops applying on the next bump), or an advisory id ("GHSA-…",
+   * "CVE-…" — that advisory stops counting toward the vuln rule). Lets a strict gate stay on
+   * for everything else instead of being red forever on findings nobody can act on (e.g.
+   * legitimate native-binary install scripts, a CVE vendored by the framework).
+   * Malicious packages are NEVER exempt. */
+  allow?: string[];
   /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
    * Shared config-file home for the CLI/Action (flags override). */
   runtimes?: Partial<Record<RuntimeName, string>>;
@@ -57,50 +64,88 @@ function licenseDenied(license: string, deny: string[]): boolean {
   });
 }
 
-/** Evaluate a policy against findings → the list of violations and whether the gate should fail. */
+/** Advisory-id shapes an `allow` entry can name (a bare "MAL-…" is deliberately NOT allowable). */
+const ADVISORY_ID = /^(GHSA|CVE|PYSEC|OSV|RUSTSEC|GO)-/i;
+
+/** All violations of `rules` for one finding, judging the vuln rule against `vulns`
+ * (the caller may have filtered allow-listed advisories out of it). */
+function ruleViolations(f: Finding, rules: NonNullable<Policy['failOn']>, vulns: Finding['vulns']): Violation[] {
+  const at = `${f.name}@${f.version ?? f.range}`;
+  const out: Violation[] = [];
+  if (rules.vuln && vulns.length > 0 && meetsVulnLevel({ ...f, vulns }, rules.vuln)) {
+    out.push({ rule: 'vuln', dep: at, detail: f.reason });
+  }
+  if (rules.installScript && f.installScript) {
+    out.push({ rule: 'install-script', dep: at, detail: 'runs an install script' });
+  }
+  if (rules.suspiciousName && f.suspiciousName) {
+    out.push({ rule: 'suspicious-name', dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
+  }
+  if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
+    out.push({ rule: 'license', dep: at, detail: f.license });
+  }
+  if (
+    rules.minHealth !== undefined &&
+    f.direct !== false &&
+    f.health !== undefined &&
+    f.health < rules.minHealth
+  ) {
+    out.push({ rule: 'min-health', dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
+  }
+  if (rules.runtime && f.runtimeCompat) {
+    const rc = f.runtimeCompat;
+    const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
+    if (broken) {
+      out.push({ rule: 'runtime', dep: at, detail: f.reason });
+    } else if (rules.runtime === 'latest-dropped' && rc.latestIncompatible) {
+      out.push({
+        rule: 'runtime',
+        dep: at,
+        detail: `newest release drops ${runtimeLabel(rc.target)} — the next bump breaks (ignore ${rc.firstIncompatible ?? 'newer versions'}+)`,
+      });
+    }
+  }
+  return out;
+}
+
+/** Evaluate a policy against findings → violations, whether the gate should fail, and how many
+ * would-be violations the `allow` list suppressed (so an exemption is visible, never silent). */
 export function evaluatePolicy(
   findings: Finding[],
   policy: Policy,
-): { violations: Violation[]; fail: boolean } {
+): { violations: Violation[]; fail: boolean; suppressed: number } {
   const rules = policy.failOn ?? {};
+  const allowPkgs = new Set<string>();
+  const allowAdvisories = new Set<string>();
+  for (const raw of policy.allow ?? []) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    if (ADVISORY_ID.test(entry)) allowAdvisories.add(entry.toUpperCase());
+    else allowPkgs.add(entry);
+  }
+
   const violations: Violation[] = [];
+  let suppressed = 0;
   for (const f of findings) {
     const at = `${f.name}@${f.version ?? f.range}`;
-    if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
-      violations.push({ rule: 'vuln', dep: at, detail: f.reason });
+    // Malware fails unconditionally — independent of failOn rules and immune to `allow`.
+    if (f.verdict === 'malware') {
+      violations.push({ rule: 'malware', dep: at, detail: f.reason });
+      continue;
     }
-    if (rules.installScript && f.installScript) {
-      violations.push({ rule: 'install-script', dep: at, detail: 'runs an install script' });
+    const wouldFire = ruleViolations(f, rules, f.vulns);
+    if (allowPkgs.has(f.name) || allowPkgs.has(at)) {
+      suppressed += wouldFire.length;
+      continue;
     }
-    if (rules.suspiciousName && f.suspiciousName) {
-      violations.push({ rule: 'suspicious-name', dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
-    }
-    if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
-      violations.push({ rule: 'license', dep: at, detail: f.license });
-    }
-    if (
-      rules.minHealth !== undefined &&
-      f.direct !== false &&
-      f.health !== undefined &&
-      f.health < rules.minHealth
-    ) {
-      violations.push({ rule: 'min-health', dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
-    }
-    if (rules.runtime && f.runtimeCompat) {
-      const rc = f.runtimeCompat;
-      const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
-      if (broken) {
-        violations.push({ rule: 'runtime', dep: at, detail: f.reason });
-      } else if (rules.runtime === 'latest-dropped' && rc.latestIncompatible) {
-        violations.push({
-          rule: 'runtime',
-          dep: at,
-          detail: `newest release drops ${runtimeLabel(rc.target)} — the next bump breaks (ignore ${rc.firstIncompatible ?? 'newer versions'}+)`,
-        });
-      }
-    }
+    const liveVulns = f.vulns.filter(
+      (v) => !(allowAdvisories.has(v.id.toUpperCase()) || (v.cve && allowAdvisories.has(v.cve.toUpperCase()))),
+    );
+    const fired = liveVulns.length === f.vulns.length ? wouldFire : ruleViolations(f, rules, liveVulns);
+    suppressed += wouldFire.length - fired.length;
+    violations.push(...fired);
   }
-  return { violations, fail: violations.length > 0 };
+  return { violations, fail: violations.length > 0, suppressed };
 }
 
 /** Does this policy need latest-version / health / runtime data to be evaluated? (drives fetches) */

@@ -34,16 +34,20 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
-  - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`)
+  - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`). `allow: []` exempts adjudicated package names / `name@version` pins / advisory ids — suppressions are counted, malware is never exempt (fails even with no `vuln` rule)
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
-- `packages/action` (`@preflight/action`) — JS Action. `mode: pr` (default) diffs a PR → sticky
-  comment + `fail-level` gate (cve|kev|epss:x); `mode: repo` (scheduled) scans every committed
-  manifest → tracking issue. Writes `preflight.sarif` (uploaded to the Security tab). `report.ts`
-  pure/testable; `index.ts` octokit glue. **Committed** `dist/index.js` (tsup, CJS — Actions run
-  from source). Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml`
-  (tag → `npm publish @preflight/cli --provenance`).
+- `packages/action` (`@preflight/action`) — JS Action (node24). `mode: pr` (default) diffs the
+  **whole tree** base↔head (manifest + lockfile via raw `getContent`; lockfile-only PRs trigger
+  too) → the gate + policy evaluate the `introduced` set (direct AND transitive `name@version`s
+  new to the tree — dogfood BUG-3/#20: gating only direct diffed deps let a lockfile CVE through
+  while the comment said "No new CVEs"). Pre-existing findings stay informational. `mode: repo`
+  (scheduled) scans every committed manifest → tracking issue. Writes `preflight.sarif` (uploaded
+  to the Security tab). `report.ts` pure/testable; `index.ts` octokit glue. **Committed**
+  `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
+  changes, or the shipped action silently runs stale core). Workflows: `preflight.yml` (PR),
+  `preflight-schedule.yml` (cron), `release.yml` (tag → `npm publish @preflight/cli --provenance`).
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` (`analyzeContent()`) → metric cards + findings, matching `docs/dashboard-mockup.html`.
   Also `POST /api/scan` (`analyzeFiles()`, keyless — caller posts manifest+lockfile, `maxDuration=60`

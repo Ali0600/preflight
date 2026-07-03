@@ -39,9 +39,11 @@ per-package updater break your build.
    `cve` / `incompatible` / `stale`), with `--latest` (latest version + staleness), `--health`
    (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility), `--json`, and
    `--no-cache`. **Working today.**
-2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the changed manifests and posts a
-   sticky comment with the verdicts for added/bumped deps; fails the check on a newly-introduced
-   CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
+2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the *whole dependency tree*
+   (manifest + lockfile, so lockfile-only PRs count) and posts a sticky comment; the gate fails
+   on anything the PR **introduces** — direct or transitive — that meets `fail-level` or violates
+   the policy. Pre-existing findings stay informational (the scheduled repo scan owns those).
+   **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
 3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest → metric cards +
    findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html), dark-mode aware.
    **Live at [preflight-web.vercel.app](https://preflight-web.vercel.app)**. Also exposes a keyless
@@ -133,7 +135,8 @@ evaluated by `@preflight/core`:
     "license": ["copyleft"],
     "minHealth": 5,
     "runtime": "incompatible"
-  }
+  },
+  "allow": ["esbuild", "sharp@0.34.5", "GHSA-qx2v-qp2m-jg93"]
 }
 ```
 
@@ -146,9 +149,15 @@ evaluated by `@preflight/core`:
   newest release dropped the runtime, so the next bump breaks). Without a policy, an explicit
   `--node`/`--python` target failing to install exits non-zero; auto-detected targets
   (`.nvmrc`/`.python-version`) only warn.
+- `allow` — adjudicated exemptions, so a strict rule stays on for everything else instead of the
+  gate being red forever on findings nobody can act on (legitimate native-binary install scripts,
+  a CVE vendored by the framework). Entries: a package name (`"esbuild"`, any version), an exact
+  pin (`"sharp@0.34.5"` — stops applying on the next bump), or an advisory id (`"GHSA-…"`/`"CVE-…"`).
+  Suppressions are always counted in the output — an exemption is visible, never silent.
 
-Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
-need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.
+Malicious packages always fail, regardless of config — and the `allow` list cannot exempt them.
+`--policy` auto-enables the lookups its rules need (`license` → latest version, `minHealth` →
+health), so you don't have to remember the flags.
 
 ## Keyless to run
 

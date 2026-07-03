@@ -113,6 +113,86 @@ describe('evaluatePolicy — runtime rule', () => {
   });
 });
 
+describe('evaluatePolicy — allow list (#21)', () => {
+  it('exempts a package by name from every rule and counts the suppression', () => {
+    const findings = [
+      finding({ name: 'esbuild', installScript: true }),
+      finding({ name: 'other', installScript: true }),
+    ];
+    const r = evaluatePolicy(findings, { failOn: { installScript: true }, allow: ['esbuild'] });
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].dep).toContain('other');
+    expect(r.suppressed).toBe(1);
+    expect(r.fail).toBe(true);
+  });
+
+  it('a name@version pin exempts only that version (stops applying on the next bump)', () => {
+    const v1 = finding({ name: 'sharp', version: '0.34.5', installScript: true });
+    const v2 = finding({ name: 'sharp', version: '0.35.0', installScript: true });
+    const policy: Policy = { failOn: { installScript: true }, allow: ['sharp@0.34.5'] };
+    expect(evaluatePolicy([v1], policy).violations).toHaveLength(0);
+    expect(evaluatePolicy([v2], policy).violations).toHaveLength(1);
+  });
+
+  it('an advisory id exempts that advisory, not every advisory on the package', () => {
+    const vendored = finding({
+      name: 'postcss',
+      verdict: 'cve',
+      vulns: [{ id: 'GHSA-7fh5-64p2-3v2j', summary: 's', severity: 'medium' }],
+    });
+    const stillBad = finding({
+      name: 'bad',
+      verdict: 'cve',
+      vulns: [
+        { id: 'GHSA-7fh5-64p2-3v2j', summary: 's', severity: 'medium' },
+        { id: 'GHSA-other', summary: 's', severity: 'high' },
+      ],
+    });
+    const policy: Policy = { failOn: { vuln: 'cve' }, allow: ['GHSA-7fh5-64p2-3v2j'] };
+    const r = evaluatePolicy([vendored, stillBad], policy);
+    expect(r.violations).toHaveLength(1); // `bad` still fails on its second advisory
+    expect(r.violations[0].dep).toContain('bad');
+    expect(r.suppressed).toBe(1); // postcss's would-be violation
+  });
+
+  it('matches an advisory by its CVE alias too', () => {
+    const f = finding({
+      name: 'x',
+      verdict: 'cve',
+      vulns: [{ id: 'GHSA-x', cve: 'CVE-2023-44270', summary: 's', severity: 'medium' }],
+    });
+    const r = evaluatePolicy([f], { failOn: { vuln: 'cve' }, allow: ['cve-2023-44270'] });
+    expect(r.violations).toHaveLength(0);
+    expect(r.suppressed).toBe(1);
+  });
+
+  it('reports zero suppressions when the allow list never fires', () => {
+    const r = evaluatePolicy([finding({ name: 'clean' })], { failOn: { installScript: true }, allow: ['esbuild'] });
+    expect(r.suppressed).toBe(0);
+  });
+});
+
+describe('evaluatePolicy — malware always fails (the documented invariant)', () => {
+  const mal = finding({
+    name: 'evil',
+    verdict: 'malware',
+    reason: 'Known-malicious package (OSV MAL advisory) — remove immediately',
+    vulns: [{ id: 'MAL-1', summary: 'm', severity: 'critical', malicious: true }],
+  });
+
+  it('fails malware even when the policy has no vuln rule at all', () => {
+    const r = evaluatePolicy([mal], { failOn: { installScript: true } });
+    expect(r.fail).toBe(true);
+    expect(r.violations[0]).toMatchObject({ rule: 'malware', dep: 'evil@1.0.0' });
+  });
+
+  it('the allow list cannot exempt malware', () => {
+    const r = evaluatePolicy([mal], { failOn: {}, allow: ['evil', 'evil@1.0.0', 'MAL-1'] });
+    expect(r.fail).toBe(true);
+    expect(r.suppressed).toBe(0);
+  });
+});
+
 describe('policyNeeds', () => {
   it('asks for latest only for license rules, health for min-health, runtime for runtime', () => {
     expect(policyNeeds({ failOn: { license: ['MIT'] } })).toEqual({ latest: true, health: false, runtime: false });

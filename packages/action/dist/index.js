@@ -23937,6 +23937,7 @@ var require_github = __commonJS({
 
 // src/index.ts
 var import_node_fs6 = require("fs");
+var import_node_os2 = require("os");
 var import_node_path5 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
@@ -24611,41 +24612,71 @@ function licenseDenied(license, deny) {
     return license.toLowerCase() === dl;
   });
 }
-function evaluatePolicy(findings, policy) {
-  const rules = policy.failOn ?? {};
-  const violations = [];
-  for (const f of findings) {
-    const at = `${f.name}@${f.version ?? f.range}`;
-    if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
-      violations.push({ rule: "vuln", dep: at, detail: f.reason });
-    }
-    if (rules.installScript && f.installScript) {
-      violations.push({ rule: "install-script", dep: at, detail: "runs an install script" });
-    }
-    if (rules.suspiciousName && f.suspiciousName) {
-      violations.push({ rule: "suspicious-name", dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
-    }
-    if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
-      violations.push({ rule: "license", dep: at, detail: f.license });
-    }
-    if (rules.minHealth !== void 0 && f.direct !== false && f.health !== void 0 && f.health < rules.minHealth) {
-      violations.push({ rule: "min-health", dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
-    }
-    if (rules.runtime && f.runtimeCompat) {
-      const rc = f.runtimeCompat;
-      const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
-      if (broken) {
-        violations.push({ rule: "runtime", dep: at, detail: f.reason });
-      } else if (rules.runtime === "latest-dropped" && rc.latestIncompatible) {
-        violations.push({
-          rule: "runtime",
-          dep: at,
-          detail: `newest release drops ${runtimeLabel(rc.target)} \u2014 the next bump breaks (ignore ${rc.firstIncompatible ?? "newer versions"}+)`
-        });
-      }
+var ADVISORY_ID = /^(GHSA|CVE|PYSEC|OSV|RUSTSEC|GO)-/i;
+function ruleViolations(f, rules, vulns) {
+  const at = `${f.name}@${f.version ?? f.range}`;
+  const out = [];
+  if (rules.vuln && vulns.length > 0 && meetsVulnLevel({ ...f, vulns }, rules.vuln)) {
+    out.push({ rule: "vuln", dep: at, detail: f.reason });
+  }
+  if (rules.installScript && f.installScript) {
+    out.push({ rule: "install-script", dep: at, detail: "runs an install script" });
+  }
+  if (rules.suspiciousName && f.suspiciousName) {
+    out.push({ rule: "suspicious-name", dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
+  }
+  if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
+    out.push({ rule: "license", dep: at, detail: f.license });
+  }
+  if (rules.minHealth !== void 0 && f.direct !== false && f.health !== void 0 && f.health < rules.minHealth) {
+    out.push({ rule: "min-health", dep: at, detail: `health ${f.health.toFixed(1)} < ${rules.minHealth}` });
+  }
+  if (rules.runtime && f.runtimeCompat) {
+    const rc = f.runtimeCompat;
+    const broken = rc.rangeUnsatisfiable || rc.resolvedIncompatible;
+    if (broken) {
+      out.push({ rule: "runtime", dep: at, detail: f.reason });
+    } else if (rules.runtime === "latest-dropped" && rc.latestIncompatible) {
+      out.push({
+        rule: "runtime",
+        dep: at,
+        detail: `newest release drops ${runtimeLabel(rc.target)} \u2014 the next bump breaks (ignore ${rc.firstIncompatible ?? "newer versions"}+)`
+      });
     }
   }
-  return { violations, fail: violations.length > 0 };
+  return out;
+}
+function evaluatePolicy(findings, policy) {
+  const rules = policy.failOn ?? {};
+  const allowPkgs = /* @__PURE__ */ new Set();
+  const allowAdvisories = /* @__PURE__ */ new Set();
+  for (const raw of policy.allow ?? []) {
+    const entry = raw.trim();
+    if (!entry) continue;
+    if (ADVISORY_ID.test(entry)) allowAdvisories.add(entry.toUpperCase());
+    else allowPkgs.add(entry);
+  }
+  const violations = [];
+  let suppressed = 0;
+  for (const f of findings) {
+    const at = `${f.name}@${f.version ?? f.range}`;
+    if (f.verdict === "malware") {
+      violations.push({ rule: "malware", dep: at, detail: f.reason });
+      continue;
+    }
+    const wouldFire = ruleViolations(f, rules, f.vulns);
+    if (allowPkgs.has(f.name) || allowPkgs.has(at)) {
+      suppressed += wouldFire.length;
+      continue;
+    }
+    const liveVulns = f.vulns.filter(
+      (v) => !(allowAdvisories.has(v.id.toUpperCase()) || v.cve && allowAdvisories.has(v.cve.toUpperCase()))
+    );
+    const fired = liveVulns.length === f.vulns.length ? wouldFire : ruleViolations(f, rules, liveVulns);
+    suppressed += wouldFire.length - fired.length;
+    violations.push(...fired);
+  }
+  return { violations, fail: violations.length > 0, suppressed };
 }
 function policyNeeds(policy) {
   const r = policy.failOn ?? {};
@@ -25362,11 +25393,12 @@ function typosquatHit(name, ecosystem) {
 }
 
 // src/report.ts
-function renderPolicySection(violations) {
-  if (violations.length === 0) return "";
+function renderPolicySection(violations, suppressed = 0) {
+  const note = suppressed > 0 ? ["", `_${suppressed} would-be violation(s) suppressed by the policy \`allow\` list._`] : [];
+  if (violations.length === 0) return note.join("\n");
   const lines = ["", "### \u26D4 Policy violations", "", "| Rule | Package | Detail |", "| --- | --- | --- |"];
   for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
-  return lines.join("\n");
+  return lines.concat(note).join("\n");
 }
 var MARKER = "<!-- preflight-action -->";
 var ISSUE_MARKER = "<!-- preflight-scheduled -->";
@@ -25394,6 +25426,13 @@ var ORDER = {
   stale: 4,
   safe: 5
 };
+function depKey(d) {
+  return `${d.name}@${d.version ?? d.range}`;
+}
+function introducedKeys(base, head) {
+  const baseKeys = new Set(base.map(depKey));
+  return new Set(head.filter((f) => !baseKeys.has(depKey(f))).map(depKey));
+}
 function diffDeclared(base, head) {
   const baseRange = new Map(base.map((d) => [d.name, d.range]));
   const changes = /* @__PURE__ */ new Map();
@@ -25403,11 +25442,14 @@ function diffDeclared(base, head) {
   }
   return changes;
 }
+function introducedFindings({ report, introduced }) {
+  return report.findings.filter((f) => introduced.has(depKey(f)));
+}
 function newCveCount(results) {
   let n = 0;
-  for (const { report, changes } of results) {
-    for (const f of report.findings) {
-      if (f.direct !== false && changes.has(f.name) && f.verdict === "cve") n += 1;
+  for (const r of results) {
+    for (const f of introducedFindings(r)) {
+      if (f.verdict === "cve" || f.verdict === "malware") n += 1;
     }
   }
   return n;
@@ -25416,15 +25458,13 @@ function changedFindings({ report, changes }) {
   return report.findings.filter((f) => f.direct !== false && changes.has(f.name)).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
 }
 function shouldFail(results, level) {
-  return results.some(
-    ({ report, changes }) => report.findings.some(
-      (f) => f.direct !== false && changes.has(f.name) && meetsVulnLevel(f, level)
-    )
-  );
+  return results.some((r) => introducedFindings(r).some((f) => meetsVulnLevel(f, level)));
 }
-function transitiveCves(results) {
+function preexistingTransitiveCves(results) {
   return results.flatMap(
-    (r) => r.report.findings.filter((f) => f.direct === false && f.vulns.length > 0)
+    (r) => r.report.findings.filter(
+      (f) => f.direct === false && f.vulns.length > 0 && !r.introduced.has(depKey(f))
+    )
   );
 }
 function renderRepoIssue(reports) {
@@ -25447,53 +25487,82 @@ function renderRepoIssue(reports) {
   lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
   return { body: lines.join("\n"), count };
 }
+var TRANSITIVE_ROWS = 10;
 function renderComment(results) {
-  const withChanges = results.filter((r) => r.changes.size > 0);
+  const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
   const lines = [MARKER, "## \u2708\uFE0F Preflight \u2014 dependency check", ""];
-  if (withChanges.length === 0) {
+  if (active.length === 0) {
     lines.push("No added or bumped dependencies in this PR. \u2705");
     return lines.join("\n");
   }
-  for (const r of withChanges) {
+  for (const r of active) {
     const findings = changedFindings(r);
-    const cves = findings.filter((f) => f.verdict === "cve").length;
-    const summary = cves > 0 ? ` \xB7 \u{1F7E5} ${cves} CVE` : "";
-    lines.push(`### \`${r.path}\` \u2014 ${findings.length} added/bumped${summary}`, "");
-    lines.push("| Verdict | Package | Change | Note |", "| --- | --- | --- | --- |");
-    for (const f of findings) {
-      const ver = f.version ?? f.range;
-      const nextBumpBreaks = f.runtimeCompat?.latestIncompatible && f.verdict !== "incompatible" ? `\u23EB newest release drops ${runtimeLabel(f.runtimeCompat.target)}` : "";
-      const flags = [
-        f.installScript ? "\u2699 install script" : "",
-        f.suspiciousName ? `\u26A0 resembles \`${f.suspiciousName.similarTo}\`` : "",
-        nextBumpBreaks,
-        f.license ? `\xB7 ${f.license}` : ""
-      ].filter(Boolean).join(" ");
-      const note = flags ? `${f.reason} ${flags}` : f.reason;
+    const introducedTransitive = introducedFindings(r).filter((f) => f.direct === false);
+    const transitiveRisky = introducedTransitive.filter((f) => f.vulns.length > 0).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    if (findings.length > 0) {
+      const cves = findings.filter((f) => f.verdict === "cve").length;
+      const summary = cves > 0 ? ` \xB7 \u{1F7E5} ${cves} CVE` : "";
+      lines.push(`### \`${r.path}\` \u2014 ${findings.length} added/bumped${summary}`, "");
+      lines.push("| Verdict | Package | Change | Note |", "| --- | --- | --- | --- |");
+      for (const f of findings) {
+        const ver = f.version ?? f.range;
+        const nextBumpBreaks = f.runtimeCompat?.latestIncompatible && f.verdict !== "incompatible" ? `\u23EB newest release drops ${runtimeLabel(f.runtimeCompat.target)}` : "";
+        const flags = [
+          f.installScript ? "\u2699 install script" : "",
+          f.suspiciousName ? `\u26A0 resembles \`${f.suspiciousName.similarTo}\`` : "",
+          nextBumpBreaks,
+          f.license ? `\xB7 ${f.license}` : ""
+        ].filter(Boolean).join(" ");
+        const note = flags ? `${f.reason} ${flags}` : f.reason;
+        lines.push(
+          `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`
+        );
+      }
+      lines.push("");
+    } else {
       lines.push(
-        `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`
+        `### \`${r.path}\` \u2014 lockfile change \xB7 ${r.introduced.size} package(s) introduced or re-resolved`,
+        ""
       );
     }
-    lines.push("");
+    if (transitiveRisky.length > 0) {
+      lines.push(
+        `#### \u{1F50E} Transitive findings introduced by this PR \u2014 ${transitiveRisky.length}`,
+        "",
+        "| Verdict | Package | Note |",
+        "| --- | --- | --- |"
+      );
+      for (const f of transitiveRisky.slice(0, TRANSITIVE_ROWS)) {
+        lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\` | ${f.reason} |`);
+      }
+      if (transitiveRisky.length > TRANSITIVE_ROWS) {
+        lines.push(`| \u2026 | _+${transitiveRisky.length - TRANSITIVE_ROWS} more_ | see the SARIF upload / run the CLI |`);
+      }
+      lines.push("");
+    } else if (findings.length === 0) {
+      lines.push("None of the introduced packages carry known CVEs. \u2705", "");
+    }
   }
-  const transitive = transitiveCves(results);
-  if (transitive.length > 0) {
-    const names = [...new Set(transitive.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+  const preexisting = preexistingTransitiveCves(results);
+  if (preexisting.length > 0) {
+    const names = [...new Set(preexisting.map((f) => `\`${f.name}@${f.version}\``))].slice(0, 8);
+    const noun = preexisting.length === 1 ? "dependency carries" : "dependencies carry";
     lines.push(
-      `\u{1F50E} ${transitive.length} transitive ${transitive.length === 1 ? "dependency" : "dependencies"} in the tree carry known CVEs: ${names.join(", ")}${transitive.length > names.length ? ", \u2026" : ""}`,
+      `\u{1F50E} ${preexisting.length} pre-existing transitive ${noun} known CVEs (already in the base tree \u2014 not introduced here): ${names.join(", ")}${preexisting.length > names.length ? ", \u2026" : ""}`,
       ""
     );
   }
   const newCves = newCveCount(results);
   lines.push("---");
   lines.push(
-    newCves > 0 ? `\u274C **This PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE.**` : "\u2705 **No new CVEs introduced.**"
+    newCves > 0 ? `\u274C **This PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE or malicious advisory (direct and transitive counted).**` : "\u2705 **No new CVEs introduced (direct and transitive checked).**"
   );
   return lines.join("\n");
 }
 
 // src/index.ts
 var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
+var LOCKFILE = /(^|\/)package-lock\.json$/i;
 function resolveRuntimes(policy) {
   const targets = detectRuntimes(".");
   for (const runtime of ["node", "python"]) {
@@ -25538,9 +25607,14 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     pull_number: issue_number,
     per_page: 100
   });
-  const manifests = files.filter((f) => f.status !== "removed" && MANIFEST.test(f.filename));
-  if (manifests.length === 0) {
-    core.info("No dependency manifests changed in this PR.");
+  const manifestPaths = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    if (f.status === "removed") continue;
+    if (MANIFEST.test(f.filename)) manifestPaths.add(f.filename);
+    else if (LOCKFILE.test(f.filename)) manifestPaths.add((0, import_node_path5.join)((0, import_node_path5.dirname)(f.filename), "package.json"));
+  }
+  if (manifestPaths.size === 0) {
+    core.info("No dependency manifests or lockfiles changed in this PR.");
     return;
   }
   const analyzeOpts = {
@@ -25548,13 +25622,16 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     runtimes: resolveRuntimes(policy)
   };
   const results = [];
-  for (const f of manifests) {
-    const path = f.filename;
+  for (const path of manifestPaths) {
     try {
       const report = await analyze(path, analyzeOpts);
-      const baseDeps = await fetchBaseDeps(octokit, owner, repo, path, baseSha);
-      const changes = diffDeclared(baseDeps, report.findings.filter((d) => d.direct !== false));
-      if (changes.size > 0) results.push({ path, report, changes });
+      const baseTree = await fetchBaseTree(octokit, owner, repo, path, baseSha);
+      const changes = diffDeclared(
+        baseTree.filter((d) => d.direct !== false),
+        report.findings.filter((d) => d.direct !== false)
+      );
+      const introduced = introducedKeys(baseTree, report.findings);
+      if (changes.size > 0 || introduced.size > 0) results.push({ path, report, changes, introduced });
     } catch (err) {
       core.warning(`Skipped ${path}: ${err.message}`);
     }
@@ -25564,16 +25641,13 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     core.info("No added or bumped dependencies to report.");
     return;
   }
-  const changedFindings2 = results.flatMap(
-    (r) => r.report.findings.filter((d) => d.direct !== false && r.changes.has(d.name))
-  );
-  const policyResult = policy ? evaluatePolicy(changedFindings2, policy) : { violations: [], fail: false };
+  const policyResult = policy ? evaluatePolicy(results.flatMap(introducedFindings), policy) : { violations: [], fail: false, suppressed: 0 };
   await upsertComment(
     octokit,
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations)
+    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed)
   );
   core.setOutput("new-cves", newCveCount(results));
   const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);
@@ -25621,18 +25695,33 @@ function findManifests(root) {
   walk(root);
   return out;
 }
-async function fetchBaseDeps(octokit, owner, repo, path, ref) {
-  if (!ref) return [];
+async function fetchBaseFile(octokit, owner, repo, path, ref) {
   try {
-    const res = await octokit.rest.repos.getContent({ owner, repo, path, ref });
-    const data = res.data;
-    if (!data.content) return [];
-    const content = Buffer.from(data.content, data.encoding ?? "base64").toString(
-      "utf8"
-    );
-    return parseManifestContent(path, content).dependencies;
-  } catch {
-    return [];
+    const res = await octokit.rest.repos.getContent({ owner, repo, path, ref, mediaType: { format: "raw" } });
+    return typeof res.data === "string" ? res.data : void 0;
+  } catch (err) {
+    if (err.status !== 404) {
+      core.warning(`Could not read base ${path}@${ref.slice(0, 7)}: ${err.message}`);
+    }
+    return void 0;
+  }
+}
+async function fetchBaseTree(octokit, owner, repo, path, ref) {
+  if (!ref) return [];
+  const manifest = await fetchBaseFile(octokit, owner, repo, path, ref);
+  if (manifest === void 0) return [];
+  if (!/package\.json$/i.test(path)) return parseManifestContent(path, manifest).dependencies;
+  const dir = (0, import_node_fs6.mkdtempSync)((0, import_node_path5.join)((0, import_node_os2.tmpdir)(), "preflight-base-"));
+  try {
+    (0, import_node_fs6.writeFileSync)((0, import_node_path5.join)(dir, "package.json"), manifest);
+    const lock = await fetchBaseFile(octokit, owner, repo, (0, import_node_path5.join)((0, import_node_path5.dirname)(path), "package-lock.json"), ref);
+    if (lock !== void 0) (0, import_node_fs6.writeFileSync)((0, import_node_path5.join)(dir, "package-lock.json"), lock);
+    return parseManifest((0, import_node_path5.join)(dir, "package.json")).dependencies;
+  } catch (err) {
+    core.warning(`Base tree for ${path} incomplete (${err.message}) \u2014 diffing declared deps only.`);
+    return parseManifestContent(path, manifest).dependencies;
+  } finally {
+    (0, import_node_fs6.rmSync)(dir, { recursive: true, force: true });
   }
 }
 async function upsertComment(octokit, owner, repo, issue_number, body) {
