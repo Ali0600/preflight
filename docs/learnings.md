@@ -151,3 +151,39 @@ epochs, local versions). A checker that errs toward flagging would train users t
 **Takeaway:** for a linter/advisor, decide which error direction is acceptable up front and
 encode it in the return type (`undefined` = can't tell = stay quiet); a definite "no" must come
 only from fully-parsed input.
+
+## A PR gate must diff the resolved tree, not the declared manifest
+
+"What did this PR introduce?" has two very different answers: the *declared* diff (manifest
+entries added/bumped — what a human edited) and the *tree* diff (every `name@version`, direct or
+transitive, that's new in the lockfile). The Action gated the first and only *mentioned* the
+second, so a PR whose lockfile vendored `postcss@8.4.31` passed with "✅ No new CVEs introduced"
+while the CLI failed the same commit. The fix keys both sides on `name@version` (a package can
+appear at several versions), fetches the **base** manifest *and lockfile* to enumerate the base
+tree, and evaluates the gate + policy over the introduced set — with lockfile-only PRs (npm
+audit fix) triggering the scan at all, since `package-lock.json` previously didn't match the
+changed-file filter.
+
+**Why it came up:** dogfooding on NutriDex (BUG-3, issue #20) — the CI gate protecting `main`
+was strictly weaker than the local CLI on the same commit + policy.
+
+**Takeaway:** any change-scoped gate (security scan, license check, size budget) must diff the
+*resolved artifact* the change produces, not the source file the human edited — and every input
+that can move that artifact (the lockfile, not just the manifest) must trigger it.
+
+## An allow list is a fallback path — make it announce itself
+
+Adding policy exemptions (`"allow": ["esbuild", "GHSA-…"]`) made the strict `installScript` rule
+usable on real trees, but a silent exemption is a future blind spot: nobody remembers *why*
+esbuild is allowed, and a compromised allowed package sails through unexamined. So
+`evaluatePolicy` returns a `suppressed` count and every surface prints it ("✓ policy ok · 5
+suppressed by allow list"); pins like `sharp@0.34.5` deliberately expire on the next version
+bump; and malware is structurally exempt from exemption (checked before the allow list is even
+consulted).
+
+**Why it came up:** issue #21 — `installScript: true` fired on esbuild/fsevents/sharp in every
+real Next.js tree with no adjudication mechanism, so the gate was either red forever or off.
+
+**Takeaway:** design exemption mechanisms like resilient fallbacks: visible (count and print
+suppressions), bounded (prefer expiring pins over blanket names), and with a floor that can
+never be exempted (malware). Same rule as "a resilient fallback must announce itself".
