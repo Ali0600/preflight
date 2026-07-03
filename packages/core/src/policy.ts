@@ -80,18 +80,22 @@ export function evaluatePolicy(
   const suppressed: Violation[] = [];
   for (const f of findings) {
     const at = `${f.name}@${f.version ?? f.range}`;
+    // Malware fails unconditionally — the documented invariant holds even when the policy
+    // configures no `vuln` rule at all, and no `allow` entry is consulted.
+    if (f.verdict === 'malware') {
+      violations.push({ rule: 'vuln', dep: at, detail: f.reason });
+      continue;
+    }
     if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
-      // Malware always fails — an allow-list cannot bless a malicious package.
-      const allowed =
-        f.verdict === 'malware'
-          ? []
-          : f.vulns.filter((v) => allowAdvisories.has(v.id) || (v.cve !== undefined && allowAdvisories.has(v.cve)));
+      const allowed = f.vulns.filter(
+        (v) => allowAdvisories.has(v.id) || (v.cve !== undefined && allowAdvisories.has(v.cve)),
+      );
       const live = f.vulns.filter((v) => !allowed.includes(v));
       // Re-judge with only the un-allowed advisories: if nothing live meets the bar,
       // the finding is suppressed (and announced), not violated.
       const stillFails =
         live.length > 0 && meetsVulnLevel({ ...f, vulns: live }, rules.vuln);
-      if (f.verdict === 'malware' || stillFails) {
+      if (stillFails) {
         violations.push({ rule: 'vuln', dep: at, detail: f.reason });
       } else {
         suppressed.push({
