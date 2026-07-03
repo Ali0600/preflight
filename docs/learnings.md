@@ -111,3 +111,43 @@ A live check confirmed the design: 19 urllib3 CVEs all scored EPSS <0.03 — cor
 urgent, where CVSS would have screamed "high" at all of them.
 **Takeaway:** Map advisories to their CVE alias and enrich with EPSS+KEV before ranking; "critical
 severity" is a starting point for triage, not a priority. Bottom-heavy EPSS is a feature, not a bug.
+
+## An undocumented batch limit only shows up on large real inputs — chunk defensively
+OSV's `querybatch` takes a list of package queries but rejects very large batches with a `400` — an
+**undocumented** ~1000-query practical cap. It's invisible until a real big repo hits it (the fleet
+scan 400'd on a 1177-dep monorepo). The fix is to split into chunks of ≤1000, `Promise.all` them, and
+`.flat()` — but two details matter: (1) keep chunk order so `results[i]` still aligns with `deps[i]`
+(a batch API's results are positional), and (2) pick the chunk size (1000) so the *common* case
+(≤1000 deps) stays a single chunk with the **same cache key as before** — zero cache churn on the 99%
+path, only big repos change behavior.
+**Why it came up:** `npm run scan:repos` crashed on the one repo big enough to exceed the cap; unit
+tests with a handful of deps never approached it, so a 1001-dep test was added to lock the boundary.
+**Takeaway:** Assume every batch endpoint has an undocumented size ceiling; chunk before you hit it,
+preserve index alignment, and size the chunk so the ordinary case is byte-for-byte the old single
+request (stable cache key). Add a test that crosses the chunk boundary, not just a small happy path.
+
+## The npm registry's "corgi" doc: per-version metadata in one cheap fetch
+
+`GET registry.npmjs.org/{name}` with `Accept: application/vnd.npm.install-v1+json` returns the
+abbreviated ("corgi") document — the full `versions` map with the install-relevant fields
+(`engines`, `dist`, `deprecated`) at a fraction of the full doc's size, one request per package.
+
+**Why it came up:** the runtime-compatibility check needs *per-version* `engines.node`. The full
+doc carries megabytes of readme/changelog for big packages; the corgi doc doesn't. (PyPI's
+equivalent: the legacy JSON's `releases[version][].requires_python` — also one fetch.)
+
+**Takeaway:** before fanning out per-version API calls, check whether the registry has a
+"for installers" document shape that carries the whole history in one response.
+
+## Advisory tooling should degrade to silence, not to false alarms
+
+Every evaluator in the runtime check returns `boolean | undefined`, and `undefined` is
+contractually "treat as compatible": an unparseable semver range, a PEP 440 `===` atom, or a
+missing constraint can only *suppress* a warning, never fabricate one.
+
+**Why it came up:** version-range grammars in the wild are full of exotica (`workspace:*`,
+epochs, local versions). A checker that errs toward flagging would train users to ignore it.
+
+**Takeaway:** for a linter/advisor, decide which error direction is acceptable up front and
+encode it in the return type (`undefined` = can't tell = stay quiet); a definite "no" must come
+only from fully-parsed input.
