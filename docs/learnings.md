@@ -187,3 +187,24 @@ real Next.js tree with no adjudication mechanism, so the gate was either red for
 **Takeaway:** design exemption mechanisms like resilient fallbacks: visible (count and print
 suppressions), bounded (prefer expiring pins over blanket names), and with a floor that can
 never be exempted (malware). Same rule as "a resilient fallback must announce itself".
+
+## When upstream compatibility metadata lies, only curated evidence catches it
+
+Every automated check in `plan` trusts *declared* metadata — `engines`, `Requires-Python`, peer
+ranges. T5 broke that trust: eslint-config-next 16 declares `eslint >=9`, which wrongly admits
+ESLint 10, so the recommended pair crashed at lint time and **no metadata lookup could have
+seen it coming**. The mitigation (`combos.ts`) is a curated known-bad-pairs registry: entries
+are documented breakages with an explicit boundary (`eslint >=10` × `eslint-config-next <17`),
+matched only when `satisfies()` returns a hard `true` (its "can't tell" never fires), with the
+fallback filtered through the same runtime check as everything else — and a dependabot `ignore`
+at the boundary so the auto-updater can't quietly reassemble the broken pair next week.
+
+**Why it came up:** dogfood T5 / issue #31 — `plan` validated each package individually but
+never the set, and the one failure mode it missed was the one where the upstream's own
+declaration is wrong.
+
+**Takeaway:** declared-compatibility checks have a ceiling: the declaration itself can lie.
+The escape hatch is a small, evidence-based exception list — each entry a documented breakage
+with a version boundary, never a heuristic — and it must pair with an auto-updater ignore, or
+the fix lasts exactly one dependabot cycle. Design such lists to self-expire (the boundary
+range stops matching when the fixed major ships).
