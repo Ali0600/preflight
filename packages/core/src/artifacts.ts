@@ -78,8 +78,9 @@ export function renderDependabot(plan: Plan): Artifact {
   ];
 
   const capped = plan.packages.filter((p) => p.capped && p.firstIncompatible && !p.lockstep.pinned);
+  const held = plan.packages.filter((p) => p.heldBack && !p.lockstep.pinned);
   const advice = plan.lockstepAdvice;
-  if (capped.length > 0 || advice) {
+  if (capped.length > 0 || held.length > 0 || advice) {
     lines.push('    ignore:');
   }
   if (capped.length > 0) {
@@ -87,6 +88,14 @@ export function renderDependabot(plan: Plan): Artifact {
     for (const p of capped) {
       lines.push(`      - dependency-name: ${quote(p.name)}`);
       lines.push(`        versions: ['>=${trimBoundary(p.firstIncompatible!)}']`);
+    }
+  }
+  if (held.length > 0) {
+    lines.push('      # Known-bad pairs — the newer range breaks a package planned alongside it.');
+    for (const p of held) {
+      lines.push(`      # ${p.name} ${trimBoundary(p.heldBack!.firstBad)}+ breaks with ${p.heldBack!.with}`);
+      lines.push(`      - dependency-name: ${quote(p.name)}`);
+      lines.push(`        versions: ['>=${trimBoundary(p.heldBack!.firstBad)}']`);
     }
   }
   if (advice) {

@@ -1,4 +1,5 @@
 import { renderDependabot, renderManifest, trimBoundary } from './artifacts';
+import { findComboHolds } from './combos';
 import { FRAMEWORK_SETS, lockstepFor, presentFrameworks } from './lockstep';
 import { fetchVulns } from './osv';
 import { computeRuntimeCompat } from './runtime-compat';
@@ -39,6 +40,9 @@ export interface PackagePlan {
   lockstep: LockstepInfo;
   /** Known advisories against the recommended version (surfaced, not auto-stepped). */
   vulns: Vuln[];
+  /** Set when a known-bad pair (combos.ts) held this package below its latest:
+   * newer versions break beside `with`, so dependabot must ignore `firstBad`+. */
+  heldBack?: { with: string; firstBad: string; reason: string };
   note: string;
 }
 
@@ -156,6 +160,31 @@ export async function buildPlan(req: PlanRequest): Promise<Plan> {
       note: notes.join(' · '),
     };
   });
+
+  // A pair can be individually fine yet broken together — a wrong upstream peer range
+  // hides it from every metadata check (#31: eslint 10 × eslint-config-next 16). Hold
+  // the subject back to the newest known-good release that installs on the target.
+  const holds = findComboHolds(
+    new Map(packages.map((p) => [p.name, p.recommended])),
+    (n) => metaMap.get(n),
+    target,
+    ecosystem,
+  );
+  for (const p of packages) {
+    const hold = holds.get(p.name);
+    if (!hold) continue;
+    const pair = `${hold.combo.with}@${hold.withVersion}`;
+    if (hold.fallback) {
+      p.recommended = hold.fallback;
+      p.floor = floorFor(ecosystem, hold.fallback, hold.firstBad, true);
+      p.heldBack = { with: pair, firstBad: hold.firstBad, reason: hold.combo.reason };
+      p.note = `held back: ${hold.firstBad}+ breaks with ${pair} — ${hold.combo.reason}`;
+      if (p.lockstep.pinned) p.note += ` · coordinated by ${p.lockstep.framework} — update via ${p.lockstep.tool}`;
+    } else {
+      // No safe fallback exists — warn loudly, but never downgrade blindly.
+      p.note += ` · ⚠ known-bad pair with ${pair} (${hold.combo.reason}) — no compatible fallback found, review manually`;
+    }
+  }
 
   // OSV-check the recommended versions: a floor that pins straight onto a known CVE
   // should be visible in the plan (surfaced, not auto-stepped).

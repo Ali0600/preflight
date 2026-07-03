@@ -33,6 +33,11 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `registry.ts` — latest version + last-publish date + **license** (npm registry / PyPI; under `--latest`)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
+  - `combos.ts` — known-bad version *pairs* (break together despite peer ranges admitting each
+    other, e.g. eslint 10 × eslint-config-next ≤16 — #31). `plan` holds the subject back to the
+    newest known-good runtime-compatible release + dependabot-ignores the boundary. Data-driven
+    like lockstep; entries must be documented breakages (strict `satisfies === true` matching —
+    never fire on "can't tell")
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
   - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`). `allow: { installScripts, advisories }` exempts adjudicated packages/advisories — every suppression is returned + announced; malware fails unconditionally (even with no `vuln` rule) and is never exemptible
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
