@@ -25,6 +25,8 @@ export interface Manifest {
   ecosystem: Ecosystem;
   path: string;
   dependencies: Dependency[];
+  /** npm only: whether a lockfile expanded the graph (`false` = declared/direct deps only). */
+  lockfile?: boolean;
 }
 
 export interface Vuln {
@@ -116,4 +118,6 @@ export interface Report {
   summary: Record<Verdict, number>;
   /** The runtime the scan checked against (this manifest's ecosystem), when one applied. */
   runtimeTarget?: RuntimeTarget;
+  /** npm only: whether a lockfile expanded the graph (`false` = direct deps only — warn!). */
+  lockfile?: boolean;
 }

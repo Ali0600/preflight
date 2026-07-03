@@ -94,6 +94,12 @@ describe('renderDependabot', () => {
     expect(yml).not.toContain('httpx');
   });
 
+  it('always adds a github-actions ecosystem block (repos using this file have workflows) (#22)', () => {
+    const yml = renderDependabot(plan({ packages: [pkg({ name: 'httpx' })] })).content;
+    expect(yml).toContain('- package-ecosystem: github-actions');
+    expect(yml.indexOf('github-actions')).toBeGreaterThan(yml.indexOf('package-ecosystem: pip'));
+  });
+
   it('npm: lockstep advice becomes exact + quoted wildcard ignores', () => {
     const p = plan({
       ecosystem: 'npm',

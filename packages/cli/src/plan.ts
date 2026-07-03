@@ -52,11 +52,19 @@ interface PlanOpts {
   node?: string;
   python?: string;
   framework?: string;
-  dev?: string;
+  dev?: string[];
   json?: boolean;
   write?: boolean | string;
   force?: boolean;
   cache?: boolean;
+}
+
+/** Flatten a variadic option's values, tolerating comma-separated lists: ['a,b','c'] → ['a','b','c']. */
+export function splitPackages(values: string[] = []): string[] {
+  return values
+    .flatMap((v) => v.split(','))
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export function registerPlanCommand(program: Command): void {
@@ -69,7 +77,8 @@ export function registerPlanCommand(program: Command): void {
     .option('--node <version>', 'target Node runtime ("18" = the whole 18.x series) — implies npm')
     .option('--python <version>', 'target Python runtime (e.g. "3.9") — implies pip')
     .option('--framework <name>', 'seed a framework lockstep set (e.g. expo, next.js) — npm only')
-    .option('--dev <packages>', 'comma-separated dev-only packages')
+    // Variadic: consumes every following package until the next --flag (commas also work).
+    .option('--dev <packages...>', 'dev-only packages (list them after the flag)')
     .option('--json', 'output the raw plan as JSON')
     .option('--write [dir]', 'write the generated files into <dir> (default .)')
     .option('--force', 'overwrite existing files with --write')
@@ -92,7 +101,7 @@ export function registerPlanCommand(program: Command): void {
         const plan = await buildPlan({
           ecosystem,
           packages,
-          dev: opts.dev?.split(',') ?? [],
+          dev: splitPackages(opts.dev),
           framework: opts.framework,
           target: {
             runtime,

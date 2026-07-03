@@ -20,7 +20,8 @@ function ecosystemFor(file: string): Ecosystem {
 export function parseManifestContent(filename: string, content: string): Manifest {
   const ecosystem = ecosystemFor(basename(filename));
   const dependencies = ecosystem === 'npm' ? parseNpm(content) : parsePip(content);
-  return { ecosystem, path: filename, dependencies };
+  // Content-only parsing never sees a lockfile; `parseManifest` upgrades this when one exists.
+  return { ecosystem, path: filename, dependencies, lockfile: ecosystem === 'npm' ? false : undefined };
 }
 
 /** Parse an npm (package.json) or pip (requirements.txt) manifest file into a flat dep list. */
@@ -28,7 +29,9 @@ export function parseManifest(path: string): Manifest {
   ecosystemFor(basename(path)); // reject unsupported types before touching the filesystem
   const manifest = parseManifestContent(path, readFileSync(path, 'utf8'));
   if (manifest.ecosystem === 'npm') {
-    manifest.dependencies = enumerateNpmGraph(path, manifest.dependencies);
+    const lock = join(dirname(path), 'package-lock.json');
+    manifest.lockfile = existsSync(lock);
+    if (manifest.lockfile) manifest.dependencies = enumerateNpmGraph(lock, manifest.dependencies);
   }
   return manifest;
 }
@@ -61,9 +64,7 @@ function parseNpm(content: string): Dependency[] {
  * version — and most exploitable CVEs hide in those indirect deps, so we scan them all.
  * Declared deps are tagged `direct`; everything else in the graph is `direct: false`.
  */
-function enumerateNpmGraph(path: string, declared: Dependency[]): Dependency[] {
-  const lock = join(dirname(path), 'package-lock.json');
-  if (!existsSync(lock)) return declared;
+function enumerateNpmGraph(lock: string, declared: Dependency[]): Dependency[] {
   const lj = JSON.parse(readFileSync(lock, 'utf8')) as {
     packages?: Record<string, { version?: string; hasInstallScript?: boolean }>;
   };

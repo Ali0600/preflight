@@ -146,6 +146,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     findings,
     summary,
     runtimeTarget,
+    lockfile: manifest.lockfile,
   };
 }
 
