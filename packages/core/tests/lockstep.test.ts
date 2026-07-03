@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lockstepFor } from '../src/lockstep';
+import { lockstepFor, presentFrameworks } from '../src/lockstep';
 
 describe('lockstepFor', () => {
   it('flags Expo-managed packages with the framework + tool', () => {
@@ -37,5 +37,33 @@ describe('lockstepFor', () => {
     expect(lockstepFor('react-query').pinned).toBe(false); // starts with "react" but not a set member
     expect(lockstepFor('svelte').pinned).toBe(false); // bare svelte ≠ SvelteKit-pinned
     expect(lockstepFor('next-auth').pinned).toBe(false); // starts with "next" but not a member
+  });
+});
+
+describe('presentFrameworks (anchor detection)', () => {
+  it('detects frameworks by their anchor packages, not by shared members', () => {
+    // react is an Expo set *member*, but only `expo` itself proves Expo is in play
+    expect(presentFrameworks(['next', 'react', 'react-dom', 'zod'])).toEqual(new Set(['Next.js']));
+    expect(presentFrameworks(['expo', 'react', 'react-native'])).toEqual(new Set(['Expo']));
+    expect(presentFrameworks(['@angular/core', 'rxjs'])).toEqual(new Set(['Angular']));
+    expect(presentFrameworks(['@remix-run/react'])).toEqual(new Set(['Remix']));
+    expect(presentFrameworks(['lodash', 'react'])).toEqual(new Set());
+  });
+});
+
+describe('lockstepFor with a present-frameworks context (#18)', () => {
+  it('react is Expo-coordinated only when Expo is actually present', () => {
+    expect(lockstepFor('react', new Set(['Next.js'])).pinned).toBe(false);
+    expect(lockstepFor('react', new Set(['Expo']))).toMatchObject({ pinned: true, framework: 'Expo' });
+    expect(lockstepFor('react', new Set()).pinned).toBe(false); // no framework in play
+  });
+
+  it('the present framework still claims its own members', () => {
+    expect(lockstepFor('next', new Set(['Next.js']))).toMatchObject({ framework: 'Next.js' });
+    expect(lockstepFor('eslint-config-next', new Set(['Next.js'])).pinned).toBe(true);
+  });
+
+  it('undefined context keeps the registry-wide legacy behavior', () => {
+    expect(lockstepFor('react')).toMatchObject({ pinned: true, framework: 'Expo' });
   });
 });
