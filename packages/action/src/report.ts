@@ -8,11 +8,23 @@ import {
 
 // Pure presentation/diff logic — no @actions/* imports, so it's unit-testable on its own.
 
-/** A "⛔ Policy violations" markdown section for the PR comment, or '' when there are none. */
-export function renderPolicySection(violations: Violation[]): string {
-  if (violations.length === 0) return '';
-  const lines = ['', '### ⛔ Policy violations', '', '| Rule | Package | Detail |', '| --- | --- | --- |'];
-  for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+/** A "⛔ Policy violations" markdown section for the PR comment, or '' when there is
+ * nothing to report. Suppressions (policy `allow` rules) are announced, never silent. */
+export function renderPolicySection(violations: Violation[], suppressed: Violation[] = []): string {
+  if (violations.length === 0 && suppressed.length === 0) return '';
+  const lines: string[] = [];
+  if (violations.length > 0) {
+    lines.push('', '### ⛔ Policy violations', '', '| Rule | Package | Detail |', '| --- | --- | --- |');
+    for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+  }
+  if (suppressed.length > 0) {
+    lines.push(
+      '',
+      `<sub>${suppressed.length} finding(s) suppressed by policy \`allow\` rules: ${suppressed
+        .map((s) => `\`${s.dep}\` (${s.rule})`)
+        .join(', ')}</sub>`,
+    );
+  }
   return lines.join('\n');
 }
 

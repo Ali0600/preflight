@@ -130,14 +130,18 @@ function printReport(r: Report): void {
   console.log();
 }
 
-function printPolicy(file: string, violations: Violation[]): void {
+function printPolicy(file: string, violations: Violation[], suppressed: Violation[]): void {
   // To stderr, so it never pollutes --json / --sbom stdout.
   if (violations.length === 0) {
     console.error(pc.green(`\n✓ policy ok (${file})`));
-    return;
+  } else {
+    console.error(pc.red(`\n✗ ${violations.length} policy violation(s) (${file}):`));
+    for (const v of violations) console.error(pc.red(`  · ${v.rule}: ${v.dep} — ${v.detail}`));
   }
-  console.error(pc.red(`\n✗ ${violations.length} policy violation(s) (${file}):`));
-  for (const v of violations) console.error(pc.red(`  · ${v.rule}: ${v.dep} — ${v.detail}`));
+  // Allow rules announce themselves: what the gate deliberately ignored, in plain sight.
+  for (const s of suppressed) {
+    console.error(pc.dim(`  · allowed: ${s.rule}: ${s.dep} — ${s.detail}`));
+  }
 }
 
 const program = new Command();
@@ -231,8 +235,8 @@ program
         printReport(report);
       }
       if (policy && policyFile) {
-        const { violations, fail } = evaluatePolicy(report.findings, policy);
-        printPolicy(policyFile, violations);
+        const { violations, fail, suppressed } = evaluatePolicy(report.findings, policy);
+        printPolicy(policyFile, violations, suppressed);
         if (fail) process.exitCode = 1;
       } else {
         // Default gate: non-zero exit when any dependency carries a CVE or is malicious —
