@@ -34,5 +34,6 @@ inputs:
     required: false
     default: ''
 runs:
-  using: 'node20'
+  # node20 is deprecated on GitHub runners (they force Node 24 with a warning) — issue #24.
+  using: 'node24'
   main: 'dist/index.js'

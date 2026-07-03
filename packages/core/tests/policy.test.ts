@@ -126,6 +126,20 @@ describe('evaluatePolicy — allow rules (announced, never silent)', () => {
     expect(r.violations).toHaveLength(1);
     expect(r.suppressed).toHaveLength(0);
   });
+
+  it('malware fails even when the policy configures no vuln rule at all (#20 hardening)', () => {
+    const mal = finding({
+      name: 'evil',
+      verdict: 'malware',
+      reason: 'Known-malicious package (OSV MAL advisory) — remove immediately',
+      vulns: [{ id: 'MAL-1', summary: 'm', severity: 'critical', malicious: true }],
+    });
+    // "Malicious packages always fail, regardless of config" — previously unenforced
+    // for policies whose failOn had no `vuln` key.
+    const r = evaluatePolicy([mal], { failOn: { installScript: true } });
+    expect(r.fail).toBe(true);
+    expect(r.violations[0]).toMatchObject({ rule: 'vuln', dep: 'evil@1.0.0' });
+  });
 });
 
 describe('evaluatePolicy — runtime rule', () => {

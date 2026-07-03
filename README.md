@@ -39,9 +39,11 @@ per-package updater break your build.
    `cve` / `incompatible` / `stale`), with `--latest` (latest version + staleness), `--health`
    (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility), `--json`, and
    `--no-cache`. **Working today.**
-2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the changed manifests and posts a
-   sticky comment with the verdicts for added/bumped deps; fails the check on a newly-introduced
-   CVE. **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
+2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the *whole dependency tree*
+   (manifest + lockfile, so lockfile-only PRs count) and posts a sticky comment; the gate fails
+   on anything the PR **introduces** — direct or transitive — that meets `fail-level` or violates
+   the policy. Pre-existing findings stay informational (the scheduled repo scan owns those).
+   **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
 3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest → metric cards +
    findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html), dark-mode aware.
    **Live at [preflight-web.vercel.app](https://preflight-web.vercel.app)**. Also exposes a keyless
