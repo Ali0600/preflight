@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lockstepFor } from '../src/lockstep';
+import { lockstepFor, presentFrameworks } from '../src/lockstep';
 
 describe('lockstepFor', () => {
   it('flags Expo-managed packages with the framework + tool', () => {
@@ -37,5 +37,34 @@ describe('lockstepFor', () => {
     expect(lockstepFor('react-query').pinned).toBe(false); // starts with "react" but not a set member
     expect(lockstepFor('svelte').pinned).toBe(false); // bare svelte ≠ SvelteKit-pinned
     expect(lockstepFor('next-auth').pinned).toBe(false); // starts with "next" but not a member
+  });
+});
+
+describe('presentFrameworks', () => {
+  it('detects frameworks by their marker packages only', () => {
+    expect(presentFrameworks(['next', 'react', 'zod']).map((s) => s.framework)).toEqual(['Next.js']);
+    expect(presentFrameworks(['expo', 'react']).map((s) => s.framework)).toEqual(['Expo']);
+    expect(presentFrameworks(['@sveltejs/kit', 'svelte']).map((s) => s.framework)).toEqual(['SvelteKit']);
+    // shared members are NOT markers: react alone proves nothing
+    expect(presentFrameworks(['react', 'react-dom', 'lodash'])).toEqual([]);
+  });
+});
+
+describe('lockstepFor with project context (the dogfood BUG-1 regression)', () => {
+  it('attributes react to Next.js in a Next project — never to absent Expo', () => {
+    const next = presentFrameworks(['next', 'react', 'react-dom']);
+    expect(lockstepFor('react', next)).toMatchObject({ pinned: true, framework: 'Next.js', tool: 'npx @next/codemod upgrade' });
+    expect(lockstepFor('react-dom', next)?.framework).toBe('Next.js');
+    expect(lockstepFor('eslint-config-next', next)?.framework).toBe('Next.js');
+  });
+
+  it('still attributes react to Expo in an Expo project', () => {
+    const expo = presentFrameworks(['expo', 'react', 'react-native']);
+    expect(lockstepFor('react', expo)).toMatchObject({ pinned: true, framework: 'Expo' });
+  });
+
+  it('leaves shared members unpinned when no framework is present', () => {
+    expect(lockstepFor('react', []).pinned).toBe(false);
+    expect(lockstepFor('eslint-config-next', presentFrameworks(['react', 'vite'])).pinned).toBe(false);
   });
 });

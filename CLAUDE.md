@@ -32,7 +32,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
   - `registry.ts` — latest version + last-publish date + **license** (npm registry / PyPI; under `--latest`)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
-  - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
+  - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it.**
+    Attribution is *marker-gated*: a set claims a package only when its marker (`expo`, `next`, …)
+    is among the direct deps (`presentFrameworks` → `lockstepFor(name, context)`), so shared
+    members (`react`) never misattribute to an absent framework (dogfood BUG-1/#18)
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
   - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`)
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
@@ -75,8 +78,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - All APIs are **keyless** — never hardcode secrets. GitHub OAuth (stage 3) is deferred config.
 - **The lockstep registry is data-driven** so it's trivial to extend (Expo/Angular/Nx + Next.js/Nuxt/
   SvelteKit/Remix/Astro are seeded). Next to add: pip (Django) — and gem (Rails) once a Gemfile parser
-  exists, else that data is dead. Be conservative: a false `pinned` is bad advice (we omit bare
-  `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
+  exists, else that data is dead. Be conservative: a false `pinned` is bad advice — marker-gating
+  covers shared members (`react` sits in both the Expo and Next.js sets, claimed only when the
+  marker is present), but bare `svelte` stays out of SvelteKit's set (Svelte-without-Kit is common).
+  Every new set needs `markers`. Extending it accurately *is* much of the roadmap.
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
 ## Experience Gained

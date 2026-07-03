@@ -110,6 +110,15 @@ function printReport(r: Report): void {
   if (r.runtimeTarget) {
     console.log(pc.dim(`target runtime: ${runtimeLabel(r.runtimeTarget, true)}`));
   }
+  // Coverage matters: without a lockfile the scan silently misses the transitive tree —
+  // where most exploitable CVEs live — so say exactly what was scanned.
+  if (r.ecosystem === 'npm' && r.lockfile === false) {
+    console.log(
+      pc.yellow(
+        `⚠ no lockfile found — scanned ${direct.length} direct dependencies only (run npm install, then re-check to cover the transitive tree)`,
+      ),
+    );
+  }
   const scripts = r.findings.filter((f) => f.installScript).length;
   const suspicious = r.findings.filter((f) => f.suspiciousName).length;
   if (scripts > 0 || suspicious > 0) {

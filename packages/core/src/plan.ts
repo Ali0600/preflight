@@ -1,5 +1,5 @@
 import { renderDependabot, renderManifest, trimBoundary } from './artifacts';
-import { FRAMEWORK_SETS, lockstepFor } from './lockstep';
+import { FRAMEWORK_SETS, lockstepFor, presentFrameworks } from './lockstep';
 import { fetchVulns } from './osv';
 import { computeRuntimeCompat } from './runtime-compat';
 import { fetchRuntimeMetaAll } from './runtimes';
@@ -109,11 +109,16 @@ export async function buildPlan(req: PlanRequest): Promise<Plan> {
   }
   if (names.length === 0) throw new Error('Nothing to plan — pass packages and/or --framework');
 
+  // Lockstep attribution considers only the frameworks in play: the declared --framework
+  // (first, so it wins shared members like `react`) plus any whose marker is a planned package.
+  const frameworks = presentFrameworks(names);
+  if (fw && !frameworks.includes(fw)) frameworks.unshift(fw);
+
   const metaMap = await fetchRuntimeMetaAll(names, ecosystem);
 
   const packages: PackagePlan[] = names.map((name) => {
     const meta = metaMap.get(name) ?? { constraints: {} };
-    const lockstep = lockstepFor(name);
+    const lockstep = lockstepFor(name, frameworks);
     const latest = meta.latest;
     // Range "" = "any version": the compat result then carries the boundary info;
     // undefined result = every release installs on the target.

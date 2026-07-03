@@ -7,7 +7,7 @@ export { fetchEpss, type EpssScore } from './epss';
 export { fetchKev } from './kev';
 export { typosquatOf } from './typosquat';
 export { licenseRisk, type LicenseRisk } from './license';
-export { lockstepFor, FRAMEWORK_SETS } from './lockstep';
+export { lockstepFor, presentFrameworks, FRAMEWORK_SETS, type FrameworkSet } from './lockstep';
 export {
   evaluatePolicy,
   loadPolicy,

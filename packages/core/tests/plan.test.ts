@@ -46,6 +46,13 @@ const NPM: Record<string, unknown> = {
     'dist-tags': { latest: '56.0.0' },
     versions: { '56.0.0': { engines: { node: '>=18' } } },
   },
+  next: {
+    'dist-tags': { latest: '16.2.10' },
+    versions: { '16.2.10': { engines: { node: '>=18' } } },
+  },
+  react: { 'dist-tags': { latest: '19.2.7' }, versions: { '19.2.7': {} } },
+  'react-dom': { 'dist-tags': { latest: '19.2.7' }, versions: { '19.2.7': {} } },
+  'eslint-config-next': { 'dist-tags': { latest: '16.2.10' }, versions: { '16.2.10': {} } },
 };
 
 beforeEach(() => {
@@ -157,6 +164,25 @@ describe('buildPlan (npm + framework)', () => {
     };
     expect(json.engines.node).toBe('>=18');
     expect(json.dependencies.axios).toBe('^1.7.0');
+  });
+
+  it('attributes shared members to the declared framework (BUG-1: react ≠ "Expo" in a Next plan)', async () => {
+    const plan = await buildPlan({
+      ecosystem: 'npm',
+      packages: ['react', 'react-dom'],
+      framework: 'next.js',
+      target: NODE18,
+    });
+    const react = plan.packages.find((p) => p.name === 'react')!;
+    expect(react.lockstep).toMatchObject({ pinned: true, framework: 'Next.js' });
+    expect(react.note).toContain('coordinated by Next.js');
+    expect(react.note).not.toContain('Expo');
+
+    // …and the generated dependabot ignores now cover react/react-dom with the set
+    expect(plan.lockstepAdvice?.members).toEqual(expect.arrayContaining(['react', 'react-dom']));
+    const yml = plan.artifacts.dependabot.content;
+    expect(yml).toContain('- dependency-name: react\n');
+    expect(yml).toContain('- dependency-name: react-dom\n');
   });
 
   it('rejects an unknown framework with the known list', async () => {

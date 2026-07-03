@@ -34,10 +34,38 @@ describe('analyzeFiles', () => {
     });
     // the lockfile's transitive entry is picked up too
     expect(report.findings.find((f) => f.name === 'deep-dep')?.direct).toBe(false);
+    expect(report.lockfile).toBe(true);
   });
 
   it('throws when no manifest is among the files', async () => {
     await expect(analyzeFiles({ 'README.md': '# hi' })).rejects.toThrow(/No package\.json/);
+  });
+
+  it('flags a lockfile-less npm scan (direct deps only) so callers can warn', async () => {
+    const report = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.3.0' } }),
+    });
+    expect(report.lockfile).toBe(false);
+  });
+});
+
+describe('analyzeFiles — lockstep context (BUG-1 in `check`)', () => {
+  it('attributes react to Next.js when next is present — never to absent Expo', async () => {
+    const report = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { next: '16.2.10', react: '19.2.7' } }),
+    });
+    expect(report.findings.find((f) => f.name === 'react')?.lockstep).toMatchObject({
+      pinned: true,
+      framework: 'Next.js',
+    });
+  });
+
+  it('leaves react unpinned in a plain React app (no framework marker present)', async () => {
+    const report = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { react: '19.2.7', vite: '7.0.0' } }),
+    });
+    expect(report.findings.find((f) => f.name === 'react')?.lockstep.pinned).toBe(false);
+    expect(report.summary.pinned).toBe(0);
   });
 });
 

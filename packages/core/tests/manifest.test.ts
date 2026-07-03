@@ -40,6 +40,10 @@ describe('parseManifest — npm', () => {
       direct: false,
     });
   });
+
+  it('records that a lockfile expanded the graph', () => {
+    expect(m.lockfile).toBe(true);
+  });
 });
 
 describe('parseManifest — pip', () => {
@@ -55,6 +59,10 @@ describe('parseManifest — pip', () => {
   it('skips comments and -r include lines', () => {
     const names = m.dependencies.map((d) => d.name);
     expect(names).toEqual(['requests', 'flask', 'django']);
+  });
+
+  it('has no lockfile concept (flag stays unset)', () => {
+    expect(m.lockfile).toBeUndefined();
   });
 });
 
@@ -82,5 +90,9 @@ describe('parseManifestContent — npm exact-pin inference (no lockfile)', () =>
   it('leaves ranged specs (^ / ~) unresolved', () => {
     expect(ver('expo')).toBeUndefined();
     expect(ver('lodash')).toBeUndefined();
+  });
+
+  it('marks the scan as lockfile-less (drives the "direct deps only" hint)', () => {
+    expect(m.lockfile).toBe(false);
   });
 });

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fetchHealth, type HealthInfo } from './depsdev';
 import { fetchEpss } from './epss';
 import { fetchKev } from './kev';
-import { lockstepFor } from './lockstep';
+import { lockstepFor, presentFrameworks } from './lockstep';
 import { parseManifest, parseManifestContent } from './manifest';
 import { fetchRegistryAll } from './registry';
 import { computeRuntimeCompat } from './runtime-compat';
@@ -88,6 +88,10 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   // the runtime matching this manifest's ecosystem.
   const runtimeTarget = opts.runtimes?.[ecosystem === 'npm' ? 'node' : 'python'];
 
+  // Lockstep attribution is gated on the frameworks actually present among the direct deps —
+  // membership alone would misattribute shared packages (`react` → "Expo" in a Next.js app).
+  const frameworks = presentFrameworks(directNames);
+
   const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
@@ -108,7 +112,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       dev: d.dev,
       direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
-      lockstep: lockstepFor(d.name),
+      lockstep: lockstepFor(d.name, frameworks),
       latest: info?.latest,
       lastPublish: info?.lastPublish,
       license: info?.license,
@@ -142,6 +146,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     findings,
     summary,
     runtimeTarget,
+    lockfile: manifest.lockfile,
   };
 }
 
