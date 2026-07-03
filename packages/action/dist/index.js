@@ -24453,19 +24453,22 @@ var FRAMEWORK_SETS = [
     framework: "Expo",
     tool: "npx expo install",
     exact: ["expo", "react", "react-dom", "react-native", "react-native-web", "jest-expo"],
-    prefixes: ["expo-", "@expo/", "@react-native/", "@react-native-community/", "@react-native-async-storage/"]
+    prefixes: ["expo-", "@expo/", "@react-native/", "@react-native-community/", "@react-native-async-storage/"],
+    anchors: ["expo"]
   },
   {
     framework: "Angular",
     tool: "ng update",
     exact: ["@angular/cli"],
-    prefixes: ["@angular/", "@angular-devkit/"]
+    prefixes: ["@angular/", "@angular-devkit/"],
+    anchors: ["@angular/core", "@angular/cli"]
   },
   {
     framework: "Nx",
     tool: "nx migrate",
     exact: ["nx"],
-    prefixes: ["@nx/", "@nrwl/"]
+    prefixes: ["@nx/", "@nrwl/"],
+    anchors: ["nx"]
   },
   {
     // Next coordinates its own packages; `react`/`react-dom` are intentionally left out
@@ -24473,13 +24476,15 @@ var FRAMEWORK_SETS = [
     framework: "Next.js",
     tool: "npx @next/codemod upgrade",
     exact: ["next", "eslint-config-next"],
-    prefixes: ["@next/"]
+    prefixes: ["@next/"],
+    anchors: ["next"]
   },
   {
     framework: "Nuxt",
     tool: "npx nuxi upgrade",
     exact: ["nuxt"],
-    prefixes: ["@nuxt/", "@nuxtjs/"]
+    prefixes: ["@nuxt/", "@nuxtjs/"],
+    anchors: ["nuxt"]
   },
   {
     // `@sveltejs/kit` + adapters/plugins move together; bare `svelte` is omitted because
@@ -24487,23 +24492,35 @@ var FRAMEWORK_SETS = [
     framework: "SvelteKit",
     tool: "npx sv migrate",
     exact: [],
-    prefixes: ["@sveltejs/"]
+    prefixes: ["@sveltejs/"],
+    anchors: ["@sveltejs/kit"]
   },
   {
     framework: "Remix",
     tool: "bump all @remix-run/* to the same version",
     exact: [],
-    prefixes: ["@remix-run/"]
+    prefixes: ["@remix-run/"],
+    anchors: ["@remix-run/react", "@remix-run/node"]
   },
   {
     framework: "Astro",
     tool: "npx @astrojs/upgrade",
     exact: ["astro"],
-    prefixes: ["@astrojs/"]
+    prefixes: ["@astrojs/"],
+    anchors: ["astro"]
   }
 ];
-function lockstepFor(name) {
+function presentFrameworks(depNames) {
+  const names = depNames instanceof Set ? depNames : new Set(depNames);
+  const present = /* @__PURE__ */ new Set();
   for (const set of FRAMEWORK_SETS) {
+    if (set.anchors.some((a) => names.has(a))) present.add(set.framework);
+  }
+  return present;
+}
+function lockstepFor(name, present) {
+  for (const set of FRAMEWORK_SETS) {
+    if (present !== void 0 && !present.has(set.framework)) continue;
     if (set.exact.includes(name) || set.prefixes.some((p) => name.startsWith(p))) {
       return { pinned: true, framework: set.framework, tool: set.tool };
     }
@@ -24613,14 +24630,36 @@ function licenseDenied(license, deny) {
 }
 function evaluatePolicy(findings, policy) {
   const rules = policy.failOn ?? {};
+  const allowScripts = new Set(policy.allow?.installScripts ?? []);
+  const allowAdvisories = new Set(policy.allow?.advisories ?? []);
   const violations = [];
+  const suppressed = [];
   for (const f of findings) {
     const at = `${f.name}@${f.version ?? f.range}`;
     if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
-      violations.push({ rule: "vuln", dep: at, detail: f.reason });
+      const allowed = f.verdict === "malware" ? [] : f.vulns.filter((v) => allowAdvisories.has(v.id) || v.cve !== void 0 && allowAdvisories.has(v.cve));
+      const live = f.vulns.filter((v) => !allowed.includes(v));
+      const stillFails = live.length > 0 && meetsVulnLevel({ ...f, vulns: live }, rules.vuln);
+      if (f.verdict === "malware" || stillFails) {
+        violations.push({ rule: "vuln", dep: at, detail: f.reason });
+      } else {
+        suppressed.push({
+          rule: "vuln",
+          dep: at,
+          detail: `${allowed.map((v) => v.cve ?? v.id).join(", ")} (allow.advisories)`
+        });
+      }
     }
     if (rules.installScript && f.installScript) {
-      violations.push({ rule: "install-script", dep: at, detail: "runs an install script" });
+      if (allowScripts.has(f.name)) {
+        suppressed.push({
+          rule: "install-script",
+          dep: at,
+          detail: "runs an install script (allow.installScripts)"
+        });
+      } else {
+        violations.push({ rule: "install-script", dep: at, detail: "runs an install script" });
+      }
     }
     if (rules.suspiciousName && f.suspiciousName) {
       violations.push({ rule: "suspicious-name", dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
@@ -24645,7 +24684,7 @@ function evaluatePolicy(findings, policy) {
       }
     }
   }
-  return { violations, fail: violations.length > 0 };
+  return { violations, fail: violations.length > 0, suppressed };
 }
 function policyNeeds(policy) {
   const r = policy.failOn ?? {};
@@ -25279,6 +25318,7 @@ async function analyzeManifest(manifest, opts = {}) {
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
   const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
+  const frameworks = presentFrameworks(directNames);
   const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem),
     opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
@@ -25298,7 +25338,7 @@ async function analyzeManifest(manifest, opts = {}) {
       dev: d.dev,
       direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
-      lockstep: lockstepFor(d.name),
+      lockstep: lockstepFor(d.name, frameworks),
       latest: info2?.latest,
       lastPublish: info2?.lastPublish,
       license: info2?.license,
@@ -25362,10 +25402,19 @@ function typosquatHit(name, ecosystem) {
 }
 
 // src/report.ts
-function renderPolicySection(violations) {
-  if (violations.length === 0) return "";
-  const lines = ["", "### \u26D4 Policy violations", "", "| Rule | Package | Detail |", "| --- | --- | --- |"];
-  for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+function renderPolicySection(violations, suppressed = []) {
+  if (violations.length === 0 && suppressed.length === 0) return "";
+  const lines = [];
+  if (violations.length > 0) {
+    lines.push("", "### \u26D4 Policy violations", "", "| Rule | Package | Detail |", "| --- | --- | --- |");
+    for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+  }
+  if (suppressed.length > 0) {
+    lines.push(
+      "",
+      `<sub>${suppressed.length} finding(s) suppressed by policy \`allow\` rules: ${suppressed.map((s) => `\`${s.dep}\` (${s.rule})`).join(", ")}</sub>`
+    );
+  }
   return lines.join("\n");
 }
 var MARKER = "<!-- preflight-action -->";
@@ -25567,13 +25616,13 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
   const changedFindings2 = results.flatMap(
     (r) => r.report.findings.filter((d) => d.direct !== false && r.changes.has(d.name))
   );
-  const policyResult = policy ? evaluatePolicy(changedFindings2, policy) : { violations: [], fail: false };
+  const policyResult = policy ? evaluatePolicy(changedFindings2, policy) : { violations: [], fail: false, suppressed: [] };
   await upsertComment(
     octokit,
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations)
+    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed)
   );
   core.setOutput("new-cves", newCveCount(results));
   const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);

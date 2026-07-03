@@ -133,6 +133,10 @@ evaluated by `@preflight/core`:
     "license": ["copyleft"],
     "minHealth": 5,
     "runtime": "incompatible"
+  },
+  "allow": {
+    "installScripts": ["esbuild", "sharp"],
+    "advisories": ["GHSA-qx2v-qp2m-jg93"]
   }
 }
 ```
@@ -146,6 +150,13 @@ evaluated by `@preflight/core`:
   newest release dropped the runtime, so the next bump breaks). Without a policy, an explicit
   `--node`/`--python` target failing to install exits non-zero; auto-detected targets
   (`.nvmrc`/`.python-version`) only warn.
+
+- `allow` — adjudicated exceptions that keep strict rules usable on real dependency trees:
+  `installScripts` lists packages permitted to run install scripts (legitimate native binaries
+  like esbuild/sharp/fsevents), `advisories` lists GHSA/CVE ids accepted as unactionable (e.g.
+  vendored by a framework until it ships the fix). **Every allow that fires is announced** in
+  the output (`allowed: …`) — the gate says what it deliberately ignored, so exceptions never
+  rot invisibly. Malware is never suppressible.
 
 Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
 need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.

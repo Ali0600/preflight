@@ -70,6 +70,61 @@ describe('evaluatePolicy', () => {
     const r = evaluatePolicy([finding({ name: 'clean' })], { failOn: { installScript: true } });
     expect(r.fail).toBe(false);
     expect(r.violations).toHaveLength(0);
+    expect(r.suppressed).toHaveLength(0);
+  });
+});
+
+describe('evaluatePolicy — allow rules (announced, never silent)', () => {
+  const vuln = (id: string, cve?: string) => ({ id, summary: 's', severity: 'medium' as const, cve });
+
+  it('allow.installScripts suppresses and announces instead of violating', () => {
+    const findings = [
+      finding({ name: 'esbuild', installScript: true }),
+      finding({ name: 'left-pad', installScript: true }),
+    ];
+    const r = evaluatePolicy(findings, {
+      failOn: { installScript: true },
+      allow: { installScripts: ['esbuild'] },
+    });
+    expect(r.fail).toBe(true); // left-pad still violates
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].dep).toContain('left-pad');
+    expect(r.suppressed).toHaveLength(1);
+    expect(r.suppressed[0]).toMatchObject({ rule: 'install-script' });
+    expect(r.suppressed[0].dep).toContain('esbuild');
+    expect(r.suppressed[0].detail).toContain('allow.installScripts');
+  });
+
+  it('allow.advisories suppresses only when every live advisory is allowed', () => {
+    const partly = finding({ name: 'multi', verdict: 'cve', vulns: [vuln('GHSA-a', 'CVE-1'), vuln('GHSA-b')] });
+    const fully = finding({ name: 'postcss', verdict: 'cve', vulns: [vuln('GHSA-qx2v-qp2m-jg93')] });
+    const policy: Policy = {
+      failOn: { vuln: 'cve' },
+      allow: { advisories: ['CVE-1', 'GHSA-qx2v-qp2m-jg93'] },
+    };
+    const r = evaluatePolicy([partly, fully], policy);
+    expect(r.violations).toHaveLength(1); // GHSA-b is still live on `multi`
+    expect(r.violations[0].dep).toContain('multi');
+    expect(r.suppressed).toHaveLength(1);
+    expect(r.suppressed[0].dep).toContain('postcss');
+    expect(r.suppressed[0].detail).toContain('GHSA-qx2v-qp2m-jg93');
+    expect(r.fail).toBe(true);
+    // Fully-allowed tree passes
+    const ok = evaluatePolicy([fully], policy);
+    expect(ok.fail).toBe(false);
+    expect(ok.suppressed).toHaveLength(1);
+  });
+
+  it('malware can never be allow-listed away', () => {
+    const mal = finding({
+      name: 'evil',
+      verdict: 'malware',
+      vulns: [{ id: 'MAL-1', summary: 'm', severity: 'critical', malicious: true }],
+    });
+    const r = evaluatePolicy([mal], { failOn: { vuln: 'cve' }, allow: { advisories: ['MAL-1'] } });
+    expect(r.fail).toBe(true);
+    expect(r.violations).toHaveLength(1);
+    expect(r.suppressed).toHaveLength(0);
   });
 });
 

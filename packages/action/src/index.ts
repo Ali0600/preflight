@@ -129,14 +129,14 @@ async function runPrScan(
   );
   const policyResult = policy
     ? evaluatePolicy(changedFindings, policy)
-    : { violations: [], fail: false };
+    : { violations: [], fail: false, suppressed: [] };
 
   await upsertComment(
     octokit,
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations),
+    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed),
   );
   core.setOutput('new-cves', newCveCount(results));
 

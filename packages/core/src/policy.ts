@@ -27,6 +27,16 @@ export interface Policy {
   /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
    * Shared config-file home for the CLI/Action (flags override). */
   runtimes?: Partial<Record<RuntimeName, string>>;
+  /** Adjudicated exceptions. Every allow that fires is ANNOUNCED in the result's
+   * `suppressed` list — a silent allow-list becomes invisible risk. Malware is never
+   * suppressible. */
+  allow?: {
+    /** Packages permitted to run install scripts (native binaries: esbuild, sharp, …). */
+    installScripts?: string[];
+    /** Advisory ids (GHSA-… / CVE-…) accepted as unactionable (e.g. vendored by a
+     * framework that hasn't released the fix yet). */
+    advisories?: string[];
+  };
 }
 
 export interface Violation {
@@ -57,20 +67,50 @@ function licenseDenied(license: string, deny: string[]): boolean {
   });
 }
 
-/** Evaluate a policy against findings → the list of violations and whether the gate should fail. */
+/** Evaluate a policy against findings → violations, whether the gate should fail, and the
+ * findings an `allow` rule suppressed (announced, never silent). */
 export function evaluatePolicy(
   findings: Finding[],
   policy: Policy,
-): { violations: Violation[]; fail: boolean } {
+): { violations: Violation[]; fail: boolean; suppressed: Violation[] } {
   const rules = policy.failOn ?? {};
+  const allowScripts = new Set(policy.allow?.installScripts ?? []);
+  const allowAdvisories = new Set(policy.allow?.advisories ?? []);
   const violations: Violation[] = [];
+  const suppressed: Violation[] = [];
   for (const f of findings) {
     const at = `${f.name}@${f.version ?? f.range}`;
     if (rules.vuln && meetsVulnLevel(f, rules.vuln)) {
-      violations.push({ rule: 'vuln', dep: at, detail: f.reason });
+      // Malware always fails — an allow-list cannot bless a malicious package.
+      const allowed =
+        f.verdict === 'malware'
+          ? []
+          : f.vulns.filter((v) => allowAdvisories.has(v.id) || (v.cve !== undefined && allowAdvisories.has(v.cve)));
+      const live = f.vulns.filter((v) => !allowed.includes(v));
+      // Re-judge with only the un-allowed advisories: if nothing live meets the bar,
+      // the finding is suppressed (and announced), not violated.
+      const stillFails =
+        live.length > 0 && meetsVulnLevel({ ...f, vulns: live }, rules.vuln);
+      if (f.verdict === 'malware' || stillFails) {
+        violations.push({ rule: 'vuln', dep: at, detail: f.reason });
+      } else {
+        suppressed.push({
+          rule: 'vuln',
+          dep: at,
+          detail: `${allowed.map((v) => v.cve ?? v.id).join(', ')} (allow.advisories)`,
+        });
+      }
     }
     if (rules.installScript && f.installScript) {
-      violations.push({ rule: 'install-script', dep: at, detail: 'runs an install script' });
+      if (allowScripts.has(f.name)) {
+        suppressed.push({
+          rule: 'install-script',
+          dep: at,
+          detail: 'runs an install script (allow.installScripts)',
+        });
+      } else {
+        violations.push({ rule: 'install-script', dep: at, detail: 'runs an install script' });
+      }
     }
     if (rules.suspiciousName && f.suspiciousName) {
       violations.push({ rule: 'suspicious-name', dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
@@ -100,7 +140,7 @@ export function evaluatePolicy(
       }
     }
   }
-  return { violations, fail: violations.length > 0 };
+  return { violations, fail: violations.length > 0, suppressed };
 }
 
 /** Does this policy need latest-version / health / runtime data to be evaluated? (drives fetches) */
