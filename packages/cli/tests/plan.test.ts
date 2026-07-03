@@ -58,6 +58,20 @@ describe('renderPlanRow', () => {
     expect(row).toContain('(latest 0.49.0 incompatible)');
     expect(row).toContain('requires Python >=3.10');
   });
+
+  it('marks a package held back by a known-bad pair (#31)', () => {
+    const row = renderPlanRow({
+      ...PLAN.packages[1],
+      name: 'eslint',
+      latest: '10.6.0',
+      recommended: '9.39.4',
+      heldBack: { with: 'eslint-config-next@16.2.10', firstBad: '10.0.0', reason: 'r' },
+      note: 'held back: 10.0.0+ breaks with eslint-config-next@16.2.10 — r',
+    });
+    expect(row).toContain('eslint@9.39.4');
+    expect(row).toContain('(latest 10.6.0 held back)');
+    expect(row).toContain('breaks with eslint-config-next@16.2.10');
+  });
 });
 
 describe('renderPlanText', () => {

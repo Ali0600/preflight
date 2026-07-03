@@ -21,6 +21,12 @@ export { fetchRuntimeMeta, fetchRuntimeMetaAll, type RuntimeMeta } from './runti
 export { computeRuntimeCompat } from './runtime-compat';
 export { detectRuntimes } from './runtime-detect';
 export {
+  findComboHolds,
+  KNOWN_BAD_COMBOS,
+  type ComboHold,
+  type KnownBadCombo,
+} from './combos';
+export {
   buildPlan,
   frameworkSet,
   type LockstepAdvice,

@@ -112,6 +112,15 @@ It emits the manifest (`requirements.txt` / `package.json` with an `engines` fie
 per-package bumps"). Recommended versions are OSV-checked, so a floor that would pin onto a
 known CVE is flagged in the plan.
 
+Plans are also checked against a registry of **known-bad pairs** — combinations whose declared
+peer ranges *admit* each other but that break together at runtime (e.g. `eslint@10` beside
+`eslint-config-next@16` crashes at lint time; the upstream peer range is simply wrong, so no
+metadata can reveal it). When a pair matches, the plan holds the package back to the newest
+known-good version that still installs on your runtime, says why in the output, and adds a
+dependabot `ignore` at the boundary so the auto-updater can't reintroduce the pair. Like the
+lockstep registry, the list is data-driven and evidence-based — entries are documented
+breakages, never heuristics.
+
 ## How it works
 `@preflight/core` is the single engine: `manifest` → `osv` + `lockstep` (+ `registry`/`depsdev`)
 → `verdict` → `Report`. The CLI, Action, and dashboard are thin wrappers over `analyze()`.

@@ -16,11 +16,17 @@ import pc from 'picocolors';
 // list the packages you intend to use, get the newest versions that actually install
 // there plus generated guardrails (manifest floors + dependabot ignores).
 
-/** One table row: recommended pin, cap marker, and the why. Pure — unit-tested. */
+/** One table row: recommended pin, cap/held-back marker, and the why. Pure — unit-tested. */
 export function renderPlanRow(p: PackagePlan): string {
   const version = p.recommended ?? '—';
-  const behind =
-    p.capped && p.latest && p.latest !== p.recommended ? ` (latest ${p.latest} incompatible)` : '';
+  const behindLatest = p.latest && p.latest !== p.recommended;
+  const behind = behindLatest
+    ? p.heldBack
+      ? ` (latest ${p.latest} held back)`
+      : p.capped
+        ? ` (latest ${p.latest} incompatible)`
+        : ''
+    : '';
   const head = `${p.name}@${version}${behind}${p.dev ? ' · dev' : ''}`;
   return `${head}\n    ${p.note}`;
 }

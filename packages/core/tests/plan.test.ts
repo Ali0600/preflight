@@ -50,6 +50,20 @@ const NPM: Record<string, unknown> = {
     'dist-tags': { latest: '19.0.0' },
     versions: { '19.0.0': { engines: { node: '>=18' } } },
   },
+  // All versions share the same engines so the runtime cap can't mask the combo hold.
+  eslint: {
+    'dist-tags': { latest: '10.6.0' },
+    versions: {
+      '9.38.0': { engines: { node: '>=18' } },
+      '9.39.4': { engines: { node: '>=18' } },
+      '10.0.0': { engines: { node: '>=18' } },
+      '10.6.0': { engines: { node: '>=18' } },
+    },
+  },
+  'eslint-config-next': {
+    'dist-tags': { latest: '16.2.10' },
+    versions: { '16.2.10': { engines: { node: '>=18' } } },
+  },
 };
 
 beforeEach(() => {
@@ -186,6 +200,35 @@ describe('buildPlan (npm + framework)', () => {
       pinned: true,
       framework: 'Expo',
     });
+  });
+
+  it('holds eslint below 10 beside eslint-config-next 16 — the known-bad pair (#31)', async () => {
+    const plan = await buildPlan({
+      ecosystem: 'npm',
+      packages: ['eslint', 'eslint-config-next'],
+      target: NODE18,
+    });
+    const eslint = plan.packages.find((p) => p.name === 'eslint')!;
+    expect(eslint.recommended).toBe('9.39.4'); // latest is 10.6.0 — held back
+    expect(eslint.floor).toBe('^9.39.4');
+    expect(eslint.heldBack).toMatchObject({ with: 'eslint-config-next@16.2.10', firstBad: '10.0.0' });
+    expect(eslint.note).toContain('held back: 10.0.0+ breaks with eslint-config-next@16.2.10');
+
+    // the auto-updater must not reintroduce the pair: dependabot ignores eslint >=10
+    const yml = plan.artifacts.dependabot.content;
+    expect(yml).toContain('- dependency-name: eslint');
+    expect(yml).toContain("versions: ['>=10']");
+    expect(yml).toContain('breaks with eslint-config-next@16.2.10');
+
+    // the partner itself is untouched
+    expect(plan.packages.find((p) => p.name === 'eslint-config-next')!.heldBack).toBeUndefined();
+  });
+
+  it('leaves eslint at latest when the broken partner is not in the plan', async () => {
+    const plan = await buildPlan({ ecosystem: 'npm', packages: ['eslint'], target: NODE18 });
+    expect(plan.packages[0].recommended).toBe('10.6.0');
+    expect(plan.packages[0].heldBack).toBeUndefined();
+    expect(plan.artifacts.dependabot.content).not.toContain('dependency-name: eslint');
   });
 
   it('rejects an unknown framework with the known list', async () => {

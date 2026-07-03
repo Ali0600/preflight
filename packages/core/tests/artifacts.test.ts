@@ -124,4 +124,24 @@ describe('renderDependabot', () => {
     const yml = renderDependabot(plan({ packages: [pkg({ name: 'httpx' })] })).content;
     expect(yml).not.toContain('ignore:');
   });
+
+  it('held-back packages (known-bad pairs) get their own ignore group (#31)', () => {
+    const p = plan({
+      ecosystem: 'npm',
+      target: { runtime: 'node', version: '22', source: '--node flag', explicit: true },
+      packages: [
+        pkg({
+          name: 'eslint',
+          recommended: '9.39.4',
+          floor: '^9.39.4',
+          heldBack: { with: 'eslint-config-next@16.2.10', firstBad: '10.0.0', reason: 'r' },
+        }),
+      ],
+    });
+    const yml = renderDependabot(p).content;
+    expect(yml).toContain('ignore:');
+    expect(yml).toContain('# eslint 10+ breaks with eslint-config-next@16.2.10');
+    expect(yml).toContain('- dependency-name: eslint');
+    expect(yml).toContain("versions: ['>=10']");
+  });
 });
