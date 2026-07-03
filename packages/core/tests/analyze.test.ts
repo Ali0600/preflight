@@ -39,6 +39,26 @@ describe('analyzeFiles', () => {
   it('throws when no manifest is among the files', async () => {
     await expect(analyzeFiles({ 'README.md': '# hi' })).rejects.toThrow(/No package\.json/);
   });
+
+  it('react next to `next` (no expo) is not framework-pinned (#18)', async () => {
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { next: '^16.0.0', react: '^19.0.0' } }),
+    };
+    const report = await analyzeFiles(files);
+    expect(report.findings.find((f) => f.name === 'next')?.verdict).toBe('pinned');
+    const react = report.findings.find((f) => f.name === 'react')!;
+    expect(react.lockstep.pinned).toBe(false);
+    expect(react.verdict).toBe('safe');
+
+    // ...but react next to `expo` is still Expo-coordinated
+    const expoReport = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { expo: '^56.0.0', react: '^19.0.0' } }),
+    });
+    expect(expoReport.findings.find((f) => f.name === 'react')?.lockstep).toMatchObject({
+      pinned: true,
+      framework: 'Expo',
+    });
+  });
 });
 
 describe('analyzeFiles — runtime target', () => {

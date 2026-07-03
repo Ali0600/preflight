@@ -46,6 +46,10 @@ const NPM: Record<string, unknown> = {
     'dist-tags': { latest: '56.0.0' },
     versions: { '56.0.0': { engines: { node: '>=18' } } },
   },
+  react: {
+    'dist-tags': { latest: '19.0.0' },
+    versions: { '19.0.0': { engines: { node: '>=18' } } },
+  },
 };
 
 beforeEach(() => {
@@ -157,6 +161,31 @@ describe('buildPlan (npm + framework)', () => {
     };
     expect(json.engines.node).toBe('>=18');
     expect(json.dependencies.axios).toBe('^1.7.0');
+  });
+
+  it('react in a Next.js plan is independent, not "coordinated by Expo" (#18)', async () => {
+    // The NutriDex repro: --framework next.js with react among the packages.
+    const plan = await buildPlan({
+      ecosystem: 'npm',
+      packages: ['react'],
+      framework: 'next.js',
+      target: NODE18,
+    });
+    const react = plan.packages.find((p) => p.name === 'react')!;
+    expect(react.lockstep.pinned).toBe(false);
+    expect(react.note).not.toContain('Expo');
+    expect(JSON.stringify(plan.packages)).not.toContain('npx expo install');
+    // ...while an Expo plan still claims it
+    const expoPlan = await buildPlan({
+      ecosystem: 'npm',
+      packages: ['react'],
+      framework: 'expo',
+      target: NODE18,
+    });
+    expect(expoPlan.packages.find((p) => p.name === 'react')!.lockstep).toMatchObject({
+      pinned: true,
+      framework: 'Expo',
+    });
   });
 
   it('rejects an unknown framework with the known list', async () => {

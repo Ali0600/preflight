@@ -1,5 +1,5 @@
 import { renderDependabot, renderManifest, trimBoundary } from './artifacts';
-import { FRAMEWORK_SETS, lockstepFor } from './lockstep';
+import { FRAMEWORK_SETS, lockstepFor, presentFrameworks } from './lockstep';
 import { fetchVulns } from './osv';
 import { computeRuntimeCompat } from './runtime-compat';
 import { fetchRuntimeMetaAll } from './runtimes';
@@ -111,9 +111,15 @@ export async function buildPlan(req: PlanRequest): Promise<Plan> {
 
   const metaMap = await fetchRuntimeMetaAll(names, ecosystem);
 
+  // Attribution context: the explicitly requested framework plus any whose anchor
+  // package is among the planned names — `react` in a Next.js plan must not read
+  // "coordinated by Expo" (#18).
+  const frameworks = presentFrameworks(names);
+  if (fw) frameworks.add(fw.framework);
+
   const packages: PackagePlan[] = names.map((name) => {
     const meta = metaMap.get(name) ?? { constraints: {} };
-    const lockstep = lockstepFor(name);
+    const lockstep = lockstepFor(name, frameworks);
     const latest = meta.latest;
     // Range "" = "any version": the compat result then carries the boundary info;
     // undefined result = every release installs on the target.
