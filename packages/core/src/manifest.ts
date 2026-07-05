@@ -66,7 +66,7 @@ function parseNpm(content: string): Dependency[] {
  */
 function enumerateNpmGraph(lock: string, declared: Dependency[]): Dependency[] {
   const lj = JSON.parse(readFileSync(lock, 'utf8')) as {
-    packages?: Record<string, { version?: string; hasInstallScript?: boolean }>;
+    packages?: Record<string, { version?: string; hasInstallScript?: boolean; dev?: boolean }>;
   };
   const packages = lj.packages ?? {};
 
@@ -90,7 +90,9 @@ function enumerateNpmGraph(lock: string, declared: Dependency[]): Dependency[] {
       name,
       range: '',
       version: entry.version,
-      dev: false,
+      // The lockfile marks packages only reachable via devDependencies (`"dev": true`) —
+      // propagate it, or a prod-scope-only policy would misfire on build-tool CVEs (#33).
+      dev: entry.dev === true,
       direct: false,
       installScript: entry.hasInstallScript || undefined,
     });

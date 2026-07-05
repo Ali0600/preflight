@@ -37,8 +37,10 @@ per-package updater break your build.
 ## Stages
 1. **CLI** (`@preflight/cli`) — `preflight check <manifest>` → a verdict table (`safe` / `pinned` /
    `cve` / `incompatible` / `stale`), with `--latest` (latest version + staleness), `--health`
-   (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility), `--json`, and
-   `--no-cache`. **Working today.**
+   (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility),
+   `--fail-level <level>` (tune the exit-1 gate — same grammar as the Action: `cve` / `kev` /
+   `epss:<0-1>` / `severity:<low|medium|high|critical>`), `--json`, and `--no-cache`.
+   **Working today.**
 2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the *whole dependency tree*
    (manifest + lockfile, so lockfile-only PRs count) and posts a sticky comment; the gate fails
    on anything the PR **introduces** — direct or transitive — that meets `fail-level` or violates
@@ -152,7 +154,9 @@ evaluated by `@preflight/core`:
 }
 ```
 
-- `vuln` — `"cve"` (any), `"kev"` (confirmed-exploited only), or `"epss:0.5"` (exploit probability ≥ x).
+- `vuln` — `"cve"` (any), `"kev"` (confirmed-exploited only), `"epss:0.5"` (exploit probability ≥ x),
+  or `"severity:medium"` (worst rated severity at/above the floor; unrated advisories count as
+  low, and a KEV'd advisory fails **any** floor — confirmed exploitation beats a severity label).
 - `installScript` / `suspiciousName` — fail on a dep that runs an install script / has a typosquat-like name.
 - `license` — fail on these license ids, or the buckets `"copyleft"` / `"unknown"`.
 - `minHealth` — fail if a *direct* dep's OpenSSF score is below this.

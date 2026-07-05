@@ -39,7 +39,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     like lockstep; entries must be documented breakages (strict `satisfies === true` matching —
     never fire on "can't tell")
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
-  - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy` + Action `policy-file`; `preflight.config.json`). `allow: { installScripts, advisories }` exempts adjudicated packages/advisories — every suppression is returned + announced; malware fails unconditionally (even with no `vuln` rule) and is never exemptible
+  - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy`/`--fail-level` + Action `fail-level`/`policy-file`; `preflight.config.json`). Levels: `cve|kev|epss:x|severity:x` (unrated=low, KEV beats any floor). `allow: { installScripts, advisories }` exempts adjudicated packages/advisories — every suppression is returned + announced; malware fails unconditionally (even with no `vuln` rule) and is never exemptible
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
@@ -62,7 +62,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 
 ## Commands
 - Install: `npm install`
-- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--sbom [file]`, `--latest`, `--health`, `--no-cache`)
+- Run: `npm run check -- <path/to/package.json|requirements.txt>` (`--json`, `--sbom [file]`, `--latest`, `--health`, `--fail-level cve|kev|epss:x|severity:x`, `--no-cache`)
 - Test: `npm test` (vitest — `lockstep`/`verdict`/`cvss`/`manifest` + mocked-fetch `osv`) · Typecheck: `npm run typecheck` · Lint: `npm run lint`
 - Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
 - Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)

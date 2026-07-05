@@ -30,6 +30,21 @@ describe('meetsVulnLevel', () => {
     expect(meetsVulnLevel(cve({ epss: 0.8 }), 'epss:0.5')).toBe(true);
     expect(meetsVulnLevel(cve({ epss: 0.2 }), 'epss:0.5')).toBe(false);
   });
+
+  it('severity floors: at/above fails, below passes (#35 — the tweet-extractor flip test)', () => {
+    expect(meetsVulnLevel(cve({ severity: 'low' }), 'severity:medium')).toBe(false); // baseline esbuild
+    expect(meetsVulnLevel(cve({ severity: 'medium' }), 'severity:medium')).toBe(true); // known-bad postcss
+    expect(meetsVulnLevel(cve({ severity: 'critical' }), 'severity:high')).toBe(true);
+    expect(meetsVulnLevel(cve({ severity: 'high' }), 'severity:critical')).toBe(false);
+  });
+
+  it('severity floors: KEV bypasses any floor; unrated counts as low; typos degrade to strict', () => {
+    expect(meetsVulnLevel(cve({ severity: 'low', kev: true }), 'severity:critical')).toBe(true);
+    expect(meetsVulnLevel(cve({ severity: 'unknown' }), 'severity:low')).toBe(true);
+    expect(meetsVulnLevel(cve({ severity: 'unknown' }), 'severity:medium')).toBe(false);
+    expect(meetsVulnLevel(cve({ severity: 'low' }), 'severity:hgih')).toBe(true); // typo → 'cve' strictness
+    expect(meetsVulnLevel(finding({ name: 'm', verdict: 'malware' }), 'severity:critical')).toBe(true);
+  });
 });
 
 describe('evaluatePolicy', () => {

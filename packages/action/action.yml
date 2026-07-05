@@ -14,7 +14,7 @@ inputs:
     required: false
     default: 'true'
   fail-level:
-    description: 'When to fail: "cve" (any new CVE), "kev" (confirmed-exploited only), or "epss:<0-1>" (exploit probability ≥ x). Malicious packages always fail.'
+    description: 'When to fail: "cve" (any new CVE), "kev" (confirmed-exploited only), "epss:<0-1>" (exploit probability ≥ x), or "severity:<low|medium|high|critical>" (worst rated severity at/above the floor; unrated counts as low, KEV fails any floor). Malicious packages always fail.'
     required: false
     default: 'cve'
   mode:

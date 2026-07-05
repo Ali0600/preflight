@@ -8,6 +8,7 @@ import {
   evaluatePolicy,
   licenseRisk,
   loadPolicy,
+  meetsVulnLevel,
   policyNeeds,
   runtimeLabel,
   setCacheEnabled,
@@ -119,11 +120,15 @@ function printReport(r: Report): void {
       ),
     );
   }
-  const scripts = r.findings.filter((f) => f.installScript).length;
+  // Name the script-runners, don't just count them — for npm's #1 supply-chain vector
+  // the names are the signal, and a clean transitive would otherwise never be shown (#36).
+  const scripted = r.findings.filter((f) => f.installScript);
   const suspicious = r.findings.filter((f) => f.suspiciousName).length;
-  if (scripts > 0 || suspicious > 0) {
+  if (scripted.length > 0 || suspicious > 0) {
+    const shown = scripted.slice(0, 6).map((f) => `${f.name}@${f.version ?? f.range}`);
+    const more = scripted.length > shown.length ? ` +${scripted.length - shown.length} more` : '';
     const bits = [
-      scripts > 0 ? `${scripts} run install scripts` : '',
+      scripted.length > 0 ? `${scripted.length} run install scripts — ${shown.join(', ')}${more}` : '',
       suspicious > 0 ? pc.yellow(`${suspicious} suspicious name(s)`) : '',
     ].filter(Boolean);
     console.log(pc.dim(`supply-chain: ${bits.join(' · ')}`));
@@ -176,6 +181,10 @@ program
     'target Python runtime the manifest must install on ("3.9" = the whole 3.9.x series)',
   )
   .option('--policy [file]', 'gate the run against a policy file (default ./preflight.config.json)')
+  .option(
+    '--fail-level <level>',
+    "exit-1 threshold, same grammar as the Action: 'cve' (any advisory — default), 'kev' (confirmed-exploited), 'epss:<0-1>', 'severity:<low|medium|high|critical>' (unrated counts as low; KEV always fails)",
+  )
   .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
   .action(
     async (
@@ -188,10 +197,24 @@ program
         node?: string;
         python?: string;
         policy?: boolean | string;
+        failLevel?: string;
         cache?: boolean;
       },
     ) => {
       if (opts.cache === false) setCacheEnabled(false);
+      // Core treats an unknown level as 'cve' (strict) — but at the CLI, reject typos loudly.
+      if (
+        opts.failLevel &&
+        !/^(cve|kev|epss:\d*\.?\d+|severity:(low|medium|high|critical))$/i.test(opts.failLevel)
+      ) {
+        console.error(
+          pc.red(
+            `preflight: unknown --fail-level "${opts.failLevel}" — use cve, kev, epss:<0-1>, or severity:<low|medium|high|critical>`,
+          ),
+        );
+        process.exitCode = 1;
+        return;
+      }
       // Load the policy first — its rules decide whether we need latest-version / health data.
       const policyFile =
         opts.policy === undefined
@@ -244,16 +267,23 @@ program
         printReport(report);
       }
       if (policy && policyFile) {
+        // Same precedence as the Action: with a policy, the policy decides.
+        if (opts.failLevel) {
+          console.error(pc.dim('note: --policy governs the gate — --fail-level is ignored'));
+        }
         const { violations, fail, suppressed } = evaluatePolicy(report.findings, policy);
         printPolicy(policyFile, violations, suppressed);
         if (fail) process.exitCode = 1;
       } else {
-        // Default gate: non-zero exit when any dependency carries a CVE or is malicious —
-        // or cannot install on an *explicitly* declared runtime (auto-detected targets only
-        // warn: a build that was green yesterday shouldn't fail because a .nvmrc was noticed).
+        // Default gate: non-zero exit when a vulnerability meets --fail-level ('cve' when
+        // omitted: any CVE/malware — the pre-#34 behavior) — or when a dep cannot install
+        // on an *explicitly* declared runtime (auto-detected targets only warn: a build
+        // that was green yesterday shouldn't fail because a .nvmrc was noticed).
+        const level = opts.failLevel ?? 'cve';
+        const vulnFail = report.findings.some((f) => meetsVulnLevel(f, level));
         const explicitIncompat =
           (report.runtimeTarget?.explicit ?? false) && report.summary.incompatible > 0;
-        if (report.summary.cve > 0 || report.summary.malware > 0 || explicitIncompat) {
+        if (vulnFail || explicitIncompat) {
           process.exitCode = 1;
         }
       }
