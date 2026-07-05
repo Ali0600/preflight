@@ -22,11 +22,11 @@ jobs:
     steps:
       # Third-party actions pinned to full commit SHAs (a tag is mutable) — Dependabot bumps them.
       # The local `./packages/action` is first-party (runs from this repo's committed bundle).
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - id: preflight
         uses: ./packages/action
       - name: Upload findings to the Security tab
         if: always() && hashFiles('preflight.sarif') != ''
-        uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
           sarif_file: preflight.sarif
