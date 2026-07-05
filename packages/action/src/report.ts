@@ -8,6 +8,13 @@ import {
 
 // Pure presentation/diff logic — no @actions/* imports, so it's unit-testable on its own.
 
+/** Escape a value for a Markdown table cell: a literal `|` (even inside a code span) breaks the
+ * table, and a newline breaks the row. Package names/versions come from a manifest we don't
+ * control, and advisory text is free-form — defensive, cheap. */
+function cell(s: string): string {
+  return s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+}
+
 /** A "⛔ Policy violations" markdown section for the PR comment, or '' when there is
  * nothing to report. Suppressions (policy `allow` rules) are announced, never silent. */
 export function renderPolicySection(violations: Violation[], suppressed: Violation[] = []): string {
@@ -15,7 +22,7 @@ export function renderPolicySection(violations: Violation[], suppressed: Violati
   const lines: string[] = [];
   if (violations.length > 0) {
     lines.push('', '### ⛔ Policy violations', '', '| Rule | Package | Detail |', '| --- | --- | --- |');
-    for (const v of violations) lines.push(`| \`${v.rule}\` | \`${v.dep}\` | ${v.detail} |`);
+    for (const v of violations) lines.push(`| \`${cell(v.rule)}\` | \`${cell(v.dep)}\` | ${cell(v.detail)} |`);
   }
   if (suppressed.length > 0) {
     lines.push(
@@ -153,7 +160,7 @@ export function renderRepoIssue(reports: Report[]): { body: string; count: numbe
     lines.push('| Verdict | Package | Note |', '| --- | --- | --- |');
     for (const f of findings) {
       const tag = f.direct === false ? ' _(transitive)_' : '';
-      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\`${tag} | ${f.reason} |`);
+      lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${cell(`${f.name}@${f.version ?? f.range}`)}\`${tag} | ${cell(f.reason)} |`);
     }
     lines.push('');
   }
@@ -213,7 +220,7 @@ export function renderComment(results: ManifestReport[]): string {
           .join(' ');
         const note = flags ? `${f.reason} ${flags}` : f.reason;
         lines.push(
-          `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${ver}\` | ${r.changes.get(f.name)} | ${note} |`,
+          `| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${cell(`${f.name}@${ver}`)}\` | ${cell(r.changes.get(f.name) ?? '')} | ${cell(note)} |`,
         );
       }
       lines.push('');
@@ -233,7 +240,7 @@ export function renderComment(results: ManifestReport[]): string {
         '| --- | --- | --- |',
       );
       for (const f of transitiveRisky.slice(0, TRANSITIVE_ROWS)) {
-        lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${f.name}@${f.version ?? f.range}\` | ${f.reason} |`);
+        lines.push(`| ${EMOJI[f.verdict]} ${LABEL[f.verdict]} | \`${cell(`${f.name}@${f.version ?? f.range}`)}\` | ${cell(f.reason)} |`);
       }
       if (transitiveRisky.length > TRANSITIVE_ROWS) {
         lines.push(`| … | _+${transitiveRisky.length - TRANSITIVE_ROWS} more_ | see the SARIF upload / run the CLI |`);

@@ -176,6 +176,18 @@ describe('renderComment', () => {
     const noChanges = mr({ report: report([finding('ok', 'safe')]) });
     expect(renderComment([noChanges])).toContain('No added or bumped dependencies');
   });
+
+  it('escapes `|` and newlines in table cells so a crafted advisory cannot break the table (#6)', () => {
+    const nasty: Finding = { ...finding('pkg', 'cve'), reason: 'evil | col\ninjection' };
+    const r = mr({
+      report: report([nasty]),
+      changes: new Map([['pkg', 'added']] as const),
+      introduced: keysOf(nasty),
+    });
+    const body = renderComment([r]);
+    expect(body).toContain('evil \\| col injection'); // pipe escaped, newline → space
+    expect(body).not.toContain('evil | col\ninjection'); // raw form never emitted
+  });
 });
 
 describe('renderComment — BUG-3/#20: introduced transitive findings are gated, not demoted', () => {
