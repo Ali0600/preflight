@@ -1,5 +1,6 @@
 import { cached } from './cache';
 import { cvssV3Severity } from './cvss';
+import { warn } from './log';
 import type { Dependency, Ecosystem, Severity, Vuln } from './types';
 
 // OSV.dev — free, no key. Request/response shapes verified against
@@ -59,6 +60,7 @@ function severityOf(v: OsvDetail): Severity {
 export async function fetchVulns(
   deps: Dependency[],
   ecosystem: Ecosystem,
+  onDegraded?: (source: string) => void,
 ): Promise<Map<string, Vuln[]>> {
   const out = new Map<string, Vuln[]>();
   const items = new Map<string, { name: string; version: string }>();
@@ -94,22 +96,30 @@ export async function fetchVulns(
   const details = new Map<string, Vuln>();
   await Promise.all(
     uniqueIds.map(async (id) => {
-      const vuln = await cached(`osv:vuln:${id}`, async (): Promise<Vuln | undefined> => {
-        const r = await fetch(`${OSV}/v1/vulns/${id}`);
-        if (!r.ok) return undefined;
-        const v = (await r.json()) as OsvDetail;
-        // OSV uses `MAL-…` ids for known-malicious packages (typosquats, compromised releases).
-        const malicious = id.startsWith('MAL-');
-        const cve = id.startsWith('CVE-') ? id : (v.aliases ?? []).find((a) => a.startsWith('CVE-'));
-        return {
-          id,
-          summary: v.summary ?? v.details?.slice(0, 120) ?? id,
-          severity: malicious ? 'critical' : severityOf(v),
-          cve,
-          malicious: malicious || undefined,
-        };
-      });
-      if (vuln) details.set(id, vuln);
+      try {
+        const vuln = await cached(`osv:vuln:${id}`, async (): Promise<Vuln | undefined> => {
+          const r = await fetch(`${OSV}/v1/vulns/${id}`);
+          if (r.status === 404) return undefined; // advisory genuinely absent — cacheable
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const v = (await r.json()) as OsvDetail;
+          // OSV uses `MAL-…` ids for known-malicious packages (typosquats, compromised releases).
+          const malicious = id.startsWith('MAL-');
+          const cve = id.startsWith('CVE-') ? id : (v.aliases ?? []).find((a) => a.startsWith('CVE-'));
+          return {
+            id,
+            summary: v.summary ?? v.details?.slice(0, 120) ?? id,
+            severity: malicious ? 'critical' : severityOf(v),
+            cve,
+            malicious: malicious || undefined,
+          };
+        });
+        if (vuln) details.set(id, vuln);
+      } catch (err) {
+        // A transient detail failure would otherwise cache an undefined and silently drop this
+        // advisory (a `cve` could read `safe`) for 24h — don't cache it; announce the gap instead.
+        warn(`OSV advisory ${id} lookup failed — dropped from this run: ${(err as Error).message}`);
+        onDegraded?.('OSV advisory details');
+      }
     }),
   );
 

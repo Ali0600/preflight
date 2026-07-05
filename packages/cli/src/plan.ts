@@ -88,7 +88,7 @@ export function registerPlanCommand(program: Command): void {
     .option('--json', 'output the raw plan as JSON')
     .option('--write [dir]', 'write the generated files into <dir> (default .)')
     .option('--force', 'overwrite existing files with --write')
-    .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
+    .option('--no-cache', 'bypass the on-disk 24h cache (~/.cache/preflight; set PREFLIGHT_CACHE_DIR to override)')
     .action(async (packages: string[], opts: PlanOpts) => {
       if (opts.cache === false) setCacheEnabled(false);
       if (Boolean(opts.node) === Boolean(opts.python)) {

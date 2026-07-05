@@ -191,8 +191,11 @@ CI, or the dashboard) with zero configuration.
 | **npm registry** | Latest version + last-publish date → the `stale` verdict + version transitions | `registry.npmjs.org` |
 | **PyPI** (JSON) | Latest version + upload time, for pip manifests | `pypi.org/pypi/{name}/json` |
 
-Every response is cached on disk for 24h (`.preflight-cache/`) to be a good API citizen and make
-re-runs instant.
+Every **successful** response is cached on disk for 24h (`~/.cache/preflight`; set
+`PREFLIGHT_CACHE_DIR` to override, or `--no-cache` to skip) to be a good API citizen and make
+re-runs instant. A *failed* fetch is never cached — if a source is unreachable, that scan is marked
+`degraded` (surfaced in the CLI and the PR comment) so a green result is never mistaken for
+"all clear" when, say, the KEV feed was down and exploited-status is actually unknown.
 
 > **Design principle:** every new check must be *quick, keyless, and accountless*. If a data source
 > needs an account or an API key, it doesn't belong here — that constraint is the whole point, and

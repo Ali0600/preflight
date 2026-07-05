@@ -159,6 +159,13 @@ export function renderRepoIssue(reports: Report[]): { body: string; count: numbe
   }
 
   if (count === 0) lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+  const degraded = [...new Set(reports.flatMap((r) => r.degraded ?? []))];
+  if (degraded.length > 0) {
+    lines.push(
+      `> ⚠️ **Degraded scan** — could not reach ${degraded.join(', ')} this run; results are best-effort (exploited-status may be incomplete).`,
+      '',
+    );
+  }
   lines.push(`_Last scanned ${new Date().toISOString().slice(0, 10)}._`);
   return { body: lines.join('\n'), count };
 }
@@ -254,5 +261,12 @@ export function renderComment(results: ManifestReport[]): string {
       ? `❌ **This PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE or malicious advisory (direct and transitive counted).**`
       : '✅ **No new CVEs introduced (direct and transitive checked).**',
   );
+  const degraded = [...new Set(results.flatMap((r) => r.report.degraded ?? []))];
+  if (degraded.length > 0) {
+    lines.push(
+      '',
+      `> ⚠️ **Degraded scan** — could not reach ${degraded.join(', ')} this run, so findings are best-effort (e.g. exploited-status may be incomplete). Re-run to retry.`,
+    );
+  }
   return lines.join('\n');
 }

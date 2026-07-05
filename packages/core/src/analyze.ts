@@ -92,13 +92,21 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   // lockstep members — `react` in a Next-only manifest is not "Expo-coordinated" (#18).
   const frameworks = presentFrameworks(directNames);
 
+  // Data sources that fail to fetch this run are collected (not cached — see the fetchers) so a
+  // green gate that ran with, say, KEV unavailable can announce "exploited-status unknown".
+  // A per-call Set (not module state) keeps concurrent web requests from cross-contaminating.
+  const degraded = new Set<string>();
+  const onDegraded = (source: string): void => {
+    degraded.add(source);
+  };
+
   const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
-    fetchVulns(dependencies, ecosystem),
-    opts.latest ? fetchRegistryAll(directNames, ecosystem) : undefined,
-    opts.health ? fetchHealthAll(directDeps, ecosystem) : undefined,
-    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem) : undefined,
+    fetchVulns(dependencies, ecosystem, onDegraded),
+    opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : undefined,
+    opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : undefined,
+    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : undefined,
   ]);
-  await enrichExploitability(vulnMap); // EPSS + KEV — only fires when CVEs were found
+  await enrichExploitability(vulnMap, onDegraded); // EPSS + KEV — only fires when CVEs were found
 
   const findings: Finding[] = dependencies.map((d) => {
     const info = registryMap?.get(d.name);
@@ -147,16 +155,20 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     summary,
     runtimeTarget,
     lockfile: manifest.lockfile,
+    degraded: degraded.size ? [...degraded] : undefined,
   };
 }
 
 /** Attach EPSS (exploit probability) + CISA KEV (confirmed-exploited) to each found advisory.
  * Vuln objects are shared by reference across deps, so enriching the distinct set updates all. */
-async function enrichExploitability(vulnMap: Map<string, Vuln[]>): Promise<void> {
+async function enrichExploitability(
+  vulnMap: Map<string, Vuln[]>,
+  onDegraded: (source: string) => void,
+): Promise<void> {
   const vulns = [...new Set([...vulnMap.values()].flat())];
   const cves = vulns.map((v) => v.cve).filter((c): c is string => Boolean(c));
   if (cves.length === 0) return;
-  const [epss, kev] = await Promise.all([fetchEpss(cves), fetchKev()]);
+  const [epss, kev] = await Promise.all([fetchEpss(cves, onDegraded), fetchKev(onDegraded)]);
   for (const v of vulns) {
     if (!v.cve) continue;
     const e = epss.get(v.cve);
@@ -172,13 +184,14 @@ async function enrichExploitability(vulnMap: Map<string, Vuln[]>): Promise<void>
 async function fetchHealthAll(
   deps: Dependency[],
   ecosystem: Ecosystem,
+  onDegraded: (source: string) => void,
 ): Promise<Map<string, HealthInfo>> {
   const out = new Map<string, HealthInfo>();
   await Promise.all(
     deps
       .filter((d) => d.version)
       .map(async (d) => {
-        const health = await fetchHealth(d.name, d.version!, ecosystem);
+        const health = await fetchHealth(d.name, d.version!, ecosystem, onDegraded);
         if (health.score !== undefined || health.checks?.length) out.set(d.name, health);
       }),
   );
