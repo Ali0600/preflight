@@ -23937,7 +23937,7 @@ var require_github = __commonJS({
 
 // src/index.ts
 var import_node_fs6 = require("fs");
-var import_node_os2 = require("os");
+var import_node_os3 = require("os");
 var import_node_path5 = require("path");
 var core = __toESM(require_core());
 var github = __toESM(require_github());
@@ -24028,13 +24028,16 @@ function parsePip(content) {
 // ../core/src/cache.ts
 var import_node_crypto = require("crypto");
 var import_node_fs2 = require("fs");
+var import_node_os = require("os");
 var import_node_path2 = require("path");
-var DIR = ".preflight-cache";
 var TTL_MS = 24 * 60 * 60 * 1e3;
 var enabled = true;
+function cacheDir() {
+  return process.env.PREFLIGHT_CACHE_DIR || (0, import_node_path2.join)(process.env.XDG_CACHE_HOME || (0, import_node_path2.join)((0, import_node_os.homedir)() || (0, import_node_os.tmpdir)(), ".cache"), "preflight");
+}
 function fileFor(key) {
   const hash = (0, import_node_crypto.createHash)("sha256").update(key).digest("hex").slice(0, 32);
-  return (0, import_node_path2.join)(DIR, `${hash}.json`);
+  return (0, import_node_path2.join)(cacheDir(), `${hash}.json`);
 }
 async function cached(key, compute) {
   if (!enabled) return compute();
@@ -24047,7 +24050,7 @@ async function cached(key, compute) {
   }
   const value = await compute();
   try {
-    (0, import_node_fs2.mkdirSync)(DIR, { recursive: true });
+    (0, import_node_fs2.mkdirSync)(cacheDir(), { recursive: true });
     (0, import_node_fs2.writeFileSync)(file, JSON.stringify({ v: value }));
   } catch {
   }
@@ -24093,6 +24096,11 @@ function cvssV3Severity(vector) {
   return band(roundUp(Math.min(raw, 10)));
 }
 
+// ../core/src/log.ts
+function warn(message) {
+  console.warn(`preflight: ${message}`);
+}
+
 // ../core/src/osv.ts
 var OSV = "https://api.osv.dev";
 var OSV_BATCH = 1e3;
@@ -24117,7 +24125,7 @@ function severityOf(v) {
   }
   return "unknown";
 }
-async function fetchVulns(deps, ecosystem) {
+async function fetchVulns(deps, ecosystem, onDegraded) {
   const out = /* @__PURE__ */ new Map();
   const items = /* @__PURE__ */ new Map();
   for (const d of deps) if (d.version) items.set(`${d.name}@${d.version}`, { name: d.name, version: d.version });
@@ -24143,21 +24151,27 @@ async function fetchVulns(deps, ecosystem) {
   const details = /* @__PURE__ */ new Map();
   await Promise.all(
     uniqueIds.map(async (id) => {
-      const vuln = await cached(`osv:vuln:${id}`, async () => {
-        const r = await fetch(`${OSV}/v1/vulns/${id}`);
-        if (!r.ok) return void 0;
-        const v = await r.json();
-        const malicious = id.startsWith("MAL-");
-        const cve = id.startsWith("CVE-") ? id : (v.aliases ?? []).find((a) => a.startsWith("CVE-"));
-        return {
-          id,
-          summary: v.summary ?? v.details?.slice(0, 120) ?? id,
-          severity: malicious ? "critical" : severityOf(v),
-          cve,
-          malicious: malicious || void 0
-        };
-      });
-      if (vuln) details.set(id, vuln);
+      try {
+        const vuln = await cached(`osv:vuln:${id}`, async () => {
+          const r = await fetch(`${OSV}/v1/vulns/${id}`);
+          if (r.status === 404) return void 0;
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const v = await r.json();
+          const malicious = id.startsWith("MAL-");
+          const cve = id.startsWith("CVE-") ? id : (v.aliases ?? []).find((a) => a.startsWith("CVE-"));
+          return {
+            id,
+            summary: v.summary ?? v.details?.slice(0, 120) ?? id,
+            severity: malicious ? "critical" : severityOf(v),
+            cve,
+            malicious: malicious || void 0
+          };
+        });
+        if (vuln) details.set(id, vuln);
+      } catch (err) {
+        warn(`OSV advisory ${id} lookup failed \u2014 dropped from this run: ${err.message}`);
+        onDegraded?.("OSV advisory details");
+      }
     })
   );
   for (const { it, ids } of idsByItem) {
@@ -24169,11 +24183,6 @@ async function fetchVulns(deps, ecosystem) {
   return out;
 }
 
-// ../core/src/log.ts
-function warn(message) {
-  console.warn(`preflight: ${message}`);
-}
-
 // ../core/src/registry.ts
 function pypiLicense(info2) {
   const cls = (info2?.classifiers ?? []).find((c) => c.startsWith("License ::"));
@@ -24181,33 +24190,36 @@ function pypiLicense(info2) {
   const lic = info2?.license?.trim();
   return lic && lic.length <= 40 ? lic : void 0;
 }
-async function fetchRegistry(name, ecosystem) {
-  return cached(`registry:${ecosystem}:${name}`, async () => {
-    try {
+async function fetchRegistry(name, ecosystem, onDegraded) {
+  try {
+    return await cached(`registry:${ecosystem}:${name}`, async () => {
       if (ecosystem === "npm") {
         const r2 = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`);
-        if (!r2.ok) return {};
+        if (r2.status === 404) return {};
+        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         const j2 = await r2.json();
         const license = typeof j2.license === "string" ? j2.license : j2.license?.type;
         return { latest: j2["dist-tags"]?.latest, lastPublish: j2.time?.modified, license };
       }
       const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
-      if (!r.ok) return {};
+      if (r.status === 404) return {};
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       const latest = j.info?.version;
       const lastPublish = j.urls?.[0]?.upload_time_iso_8601 ?? (latest ? j.releases?.[latest]?.[0]?.upload_time_iso_8601 : void 0);
       return { latest, lastPublish, license: pypiLicense(j.info) };
-    } catch (err) {
-      warn(`registry lookup failed for ${name}: ${err.message}`);
-      return {};
-    }
-  });
+    });
+  } catch (err) {
+    warn(`registry lookup failed for ${name}: ${err.message}`);
+    onDegraded?.(ecosystem === "npm" ? "npm registry" : "PyPI");
+    return {};
+  }
 }
-async function fetchRegistryAll(names, ecosystem) {
+async function fetchRegistryAll(names, ecosystem, onDegraded) {
   const out = /* @__PURE__ */ new Map();
   await Promise.all(
     names.map(async (name) => {
-      out.set(name, await fetchRegistry(name, ecosystem));
+      out.set(name, await fetchRegistry(name, ecosystem, onDegraded));
     })
   );
   return out;
@@ -24228,48 +24240,53 @@ var SECURITY_CHECKS = /* @__PURE__ */ new Set([
   "Signed-Releases",
   "Vulnerabilities"
 ]);
-async function fetchHealth(name, version, ecosystem) {
-  return cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
-    try {
+async function fetchHealth(name, version, ecosystem, onDegraded) {
+  try {
+    return await cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
       const sys = system(ecosystem);
       const verRes = await fetch(
         `${DEPSDEV}/systems/${sys}/packages/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
       );
-      if (!verRes.ok) return {};
+      if (verRes.status === 404) return {};
+      if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = await verRes.json();
       const related = ver.relatedProjects ?? [];
       const projectId = (related.find((p) => p.relationType === "SOURCE_REPO") ?? related[0])?.projectKey?.id;
       if (!projectId) return {};
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (!projRes.ok) return {};
+      if (projRes.status === 404) return {};
+      if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = await projRes.json();
       const checks = (proj.scorecard?.checks ?? []).filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0).map((c) => ({ name: c.name, score: c.score }));
       return { score: proj.scorecard?.overallScore, checks };
-    } catch (err) {
-      warn(`deps.dev lookup failed for ${name}@${version}: ${err.message}`);
-      return {};
-    }
-  });
+    });
+  } catch (err) {
+    warn(`deps.dev lookup failed for ${name}@${version}: ${err.message}`);
+    onDegraded?.("deps.dev");
+    return {};
+  }
 }
 
 // ../core/src/epss.ts
 var EPSS = "https://api.first.org/data/v1/epss";
-async function fetchEpss(cveIds) {
+async function fetchEpss(cveIds, onDegraded) {
   const out = /* @__PURE__ */ new Map();
   const ids = [...new Set(cveIds.filter((id) => id.startsWith("CVE-")))];
   for (let i = 0; i < ids.length; i += 100) {
     const chunk2 = ids.slice(i, i + 100);
-    const rows = await cached(`epss:${chunk2.join(",")}`, async () => {
-      try {
+    let rows = [];
+    try {
+      rows = await cached(`epss:${chunk2.join(",")}`, async () => {
         const r = await fetch(`${EPSS}?cve=${chunk2.join(",")}`);
-        if (!r.ok) return [];
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
         return j.data ?? [];
-      } catch (err) {
-        warn(`EPSS lookup failed: ${err.message}`);
-        return [];
-      }
-    });
+      });
+    } catch (err) {
+      warn(`EPSS lookup failed \u2014 exploit-probability unknown this run: ${err.message}`);
+      onDegraded?.("FIRST EPSS");
+      continue;
+    }
     for (const d of rows) out.set(d.cve, { epss: Number(d.epss), percentile: Number(d.percentile) });
   }
   return out;
@@ -24277,19 +24294,22 @@ async function fetchEpss(cveIds) {
 
 // ../core/src/kev.ts
 var KEV_FEED = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
-async function fetchKev() {
-  const ids = await cached("kev:catalog", async () => {
-    try {
+async function fetchKev(onDegraded) {
+  try {
+    const ids = await cached("kev:catalog", async () => {
       const r = await fetch(KEV_FEED);
-      if (!r.ok) return [];
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
-      return (j.vulnerabilities ?? []).map((v) => v.cveID);
-    } catch (err) {
-      warn(`CISA KEV lookup failed: ${err.message}`);
-      return [];
-    }
-  });
-  return new Set(ids);
+      const list = (j.vulnerabilities ?? []).map((v) => v.cveID);
+      if (list.length === 0) throw new Error("empty catalog");
+      return list;
+    });
+    return new Set(ids);
+  } catch (err) {
+    warn(`CISA KEV lookup failed \u2014 exploited-status unknown this run: ${err.message}`);
+    onDegraded?.("CISA KEV");
+    return /* @__PURE__ */ new Set();
+  }
 }
 
 // ../core/src/typosquat.ts
@@ -24717,14 +24737,15 @@ function loadPolicy(path) {
 
 // ../core/src/runtimes.ts
 var EMPTY = { constraints: {} };
-async function fetchRuntimeMeta(name, ecosystem) {
-  return cached(`runtimes:${ecosystem}:${name}`, async () => {
-    try {
+async function fetchRuntimeMeta(name, ecosystem, onDegraded) {
+  try {
+    return await cached(`runtimes:${ecosystem}:${name}`, async () => {
       if (ecosystem === "npm") {
         const r2 = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, {
           headers: { Accept: "application/vnd.npm.install-v1+json" }
         });
-        if (!r2.ok) return EMPTY;
+        if (r2.status === 404) return EMPTY;
+        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         const j2 = await r2.json();
         const constraints2 = {};
         for (const [v, meta] of Object.entries(j2.versions ?? {})) {
@@ -24733,7 +24754,8 @@ async function fetchRuntimeMeta(name, ecosystem) {
         return { constraints: constraints2, latest: j2["dist-tags"]?.latest };
       }
       const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
-      if (!r.ok) return EMPTY;
+      if (r.status === 404) return EMPTY;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       const constraints = {};
       for (const [v, files] of Object.entries(j.releases ?? {})) {
@@ -24742,17 +24764,18 @@ async function fetchRuntimeMeta(name, ecosystem) {
         constraints[v] = live.find((f) => f.requires_python != null)?.requires_python ?? null;
       }
       return { constraints, latest: j.info?.version };
-    } catch (err) {
-      warn(`runtime metadata lookup failed for ${name}: ${err.message}`);
-      return EMPTY;
-    }
-  });
+    });
+  } catch (err) {
+    warn(`runtime metadata lookup failed for ${name}: ${err.message}`);
+    onDegraded?.(ecosystem === "npm" ? "npm registry" : "PyPI");
+    return EMPTY;
+  }
 }
-async function fetchRuntimeMetaAll(names, ecosystem) {
+async function fetchRuntimeMetaAll(names, ecosystem, onDegraded) {
   const out = /* @__PURE__ */ new Map();
   await Promise.all(
     names.map(async (name) => {
-      out.set(name, await fetchRuntimeMeta(name, ecosystem));
+      out.set(name, await fetchRuntimeMeta(name, ecosystem, onDegraded));
     })
   );
   return out;
@@ -25324,7 +25347,7 @@ function toSarif(reports) {
 
 // ../core/src/analyze.ts
 var import_node_fs5 = require("fs");
-var import_node_os = require("os");
+var import_node_os2 = require("os");
 var import_node_path4 = require("path");
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
@@ -25335,13 +25358,17 @@ async function analyzeManifest(manifest, opts = {}) {
   const directNames = [...new Set(directDeps.map((d) => d.name))];
   const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
   const frameworks = presentFrameworks(directNames);
+  const degraded = /* @__PURE__ */ new Set();
+  const onDegraded = (source) => {
+    degraded.add(source);
+  };
   const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
-    fetchVulns(dependencies, ecosystem),
-    opts.latest ? fetchRegistryAll(directNames, ecosystem) : void 0,
-    opts.health ? fetchHealthAll(directDeps, ecosystem) : void 0,
-    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem) : void 0
+    fetchVulns(dependencies, ecosystem, onDegraded),
+    opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : void 0,
+    opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : void 0,
+    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : void 0
   ]);
-  await enrichExploitability(vulnMap);
+  await enrichExploitability(vulnMap, onDegraded);
   const findings = dependencies.map((d) => {
     const info2 = registryMap?.get(d.name);
     const health = healthMap?.get(d.name);
@@ -25385,14 +25412,15 @@ async function analyzeManifest(manifest, opts = {}) {
     findings,
     summary,
     runtimeTarget,
-    lockfile: manifest.lockfile
+    lockfile: manifest.lockfile,
+    degraded: degraded.size ? [...degraded] : void 0
   };
 }
-async function enrichExploitability(vulnMap) {
+async function enrichExploitability(vulnMap, onDegraded) {
   const vulns = [...new Set([...vulnMap.values()].flat())];
   const cves = vulns.map((v) => v.cve).filter((c) => Boolean(c));
   if (cves.length === 0) return;
-  const [epss, kev] = await Promise.all([fetchEpss(cves), fetchKev()]);
+  const [epss, kev] = await Promise.all([fetchEpss(cves, onDegraded), fetchKev(onDegraded)]);
   for (const v of vulns) {
     if (!v.cve) continue;
     const e = epss.get(v.cve);
@@ -25403,11 +25431,11 @@ async function enrichExploitability(vulnMap) {
     if (kev.has(v.cve)) v.kev = true;
   }
 }
-async function fetchHealthAll(deps, ecosystem) {
+async function fetchHealthAll(deps, ecosystem, onDegraded) {
   const out = /* @__PURE__ */ new Map();
   await Promise.all(
     deps.filter((d) => d.version).map(async (d) => {
-      const health = await fetchHealth(d.name, d.version, ecosystem);
+      const health = await fetchHealth(d.name, d.version, ecosystem, onDegraded);
       if (health.score !== void 0 || health.checks?.length) out.set(d.name, health);
     })
   );
@@ -25518,6 +25546,13 @@ function renderRepoIssue(reports) {
     lines.push("");
   }
   if (count === 0) lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+  const degraded = [...new Set(reports.flatMap((r) => r.degraded ?? []))];
+  if (degraded.length > 0) {
+    lines.push(
+      `> \u26A0\uFE0F **Degraded scan** \u2014 could not reach ${degraded.join(", ")} this run; results are best-effort (exploited-status may be incomplete).`,
+      ""
+    );
+  }
   lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
   return { body: lines.join("\n"), count };
 }
@@ -25591,6 +25626,13 @@ function renderComment(results) {
   lines.push(
     newCves > 0 ? `\u274C **This PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE or malicious advisory (direct and transitive counted).**` : "\u2705 **No new CVEs introduced (direct and transitive checked).**"
   );
+  const degraded = [...new Set(results.flatMap((r) => r.report.degraded ?? []))];
+  if (degraded.length > 0) {
+    lines.push(
+      "",
+      `> \u26A0\uFE0F **Degraded scan** \u2014 could not reach ${degraded.join(", ")} this run, so findings are best-effort (e.g. exploited-status may be incomplete). Re-run to retry.`
+    );
+  }
   return lines.join("\n");
 }
 
@@ -25745,7 +25787,7 @@ async function fetchBaseTree(octokit, owner, repo, path, ref) {
   const manifest = await fetchBaseFile(octokit, owner, repo, path, ref);
   if (manifest === void 0) return [];
   if (!/package\.json$/i.test(path)) return parseManifestContent(path, manifest).dependencies;
-  const dir = (0, import_node_fs6.mkdtempSync)((0, import_node_path5.join)((0, import_node_os2.tmpdir)(), "preflight-base-"));
+  const dir = (0, import_node_fs6.mkdtempSync)((0, import_node_path5.join)((0, import_node_os3.tmpdir)(), "preflight-base-"));
   try {
     (0, import_node_fs6.writeFileSync)((0, import_node_path5.join)(dir, "package.json"), manifest);
     const lock = await fetchBaseFile(octokit, owner, repo, (0, import_node_path5.join)((0, import_node_path5.dirname)(path), "package-lock.json"), ref);

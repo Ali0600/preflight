@@ -111,6 +111,15 @@ function printReport(r: Report): void {
   if (r.runtimeTarget) {
     console.log(pc.dim(`target runtime: ${runtimeLabel(r.runtimeTarget, true)}`));
   }
+  // A data source was unreachable this run — the results are best-effort, so say so loudly
+  // rather than letting a green gate imply "all clear" (e.g. KEV down = exploited-status unknown).
+  if (r.degraded?.length) {
+    console.log(
+      pc.yellow(
+        `⚠ degraded scan — could not reach ${r.degraded.join(', ')}; findings are best-effort (e.g. exploited-status may be unknown). Re-run to retry.`,
+      ),
+    );
+  }
   // Coverage matters: without a lockfile the scan silently misses the transitive tree —
   // where most exploitable CVEs live — so say exactly what was scanned.
   if (r.ecosystem === 'npm' && r.lockfile === false) {
@@ -185,7 +194,7 @@ program
     '--fail-level <level>',
     "exit-1 threshold, same grammar as the Action: 'cve' (any advisory — default), 'kev' (confirmed-exploited), 'epss:<0-1>', 'severity:<low|medium|high|critical>' (unrated counts as low; KEV always fails)",
   )
-  .option('--no-cache', 'bypass the on-disk 24h cache (.preflight-cache/)')
+  .option('--no-cache', 'bypass the on-disk 24h cache (~/.cache/preflight; set PREFLIGHT_CACHE_DIR to override)')
   .action(
     async (
       path: string,

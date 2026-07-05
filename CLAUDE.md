@@ -29,7 +29,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
   - `typosquat.ts` — offline lookalike heuristic (bundled top-packages list + Damerau-Levenshtein)
   - `license.ts` — `licenseRisk()` buckets a license id → permissive/copyleft/unknown
-  - `cache.ts` — `.preflight-cache/` 24h disk cache wrapping every API call (`setCacheEnabled`)
+  - `cache.ts` — 24h disk cache (`~/.cache/preflight`, per-user XDG; `PREFLIGHT_CACHE_DIR` overrides) wrapping every API call (`setCacheEnabled`). **Only successful fetches are cached** — the clients throw on failure so a transient outage can't poison the cache and silently weaken detection; failures set `Report.degraded` instead
   - `registry.ts` — latest version + last-publish date + **license** (npm registry / PyPI; under `--latest`)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**

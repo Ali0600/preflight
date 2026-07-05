@@ -36,19 +36,23 @@ const SECURITY_CHECKS = new Set([
   'Vulnerabilities',
 ]);
 
-/** OpenSSF Scorecard (overall + per-check) for the source repo backing a package version. */
+/** OpenSSF Scorecard (overall + per-check) for the source repo backing a package version.
+ * A 404 (or no linked source repo) is a legitimate "no scorecard" ({} cached); any other failure
+ * throws inside `cached` so the blank isn't persisted, and `onDegraded` announces the gap. */
 export async function fetchHealth(
   name: string,
   version: string,
   ecosystem: Ecosystem,
+  onDegraded?: (source: string) => void,
 ): Promise<HealthInfo> {
-  return cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
-    try {
+  try {
+    return await cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
       const sys = system(ecosystem);
       const verRes = await fetch(
         `${DEPSDEV}/systems/${sys}/packages/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`,
       );
-      if (!verRes.ok) return {};
+      if (verRes.status === 404) return {};
+      if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = (await verRes.json()) as VersionResponse;
       const related = ver.relatedProjects ?? [];
       const projectId = (
@@ -57,7 +61,8 @@ export async function fetchHealth(
       if (!projectId) return {};
 
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (!projRes.ok) return {};
+      if (projRes.status === 404) return {};
+      if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = (await projRes.json()) as {
         scorecard?: { overallScore?: number; checks?: { name?: string; score?: number }[] };
       };
@@ -65,9 +70,10 @@ export async function fetchHealth(
         .filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0)
         .map((c) => ({ name: c.name!, score: c.score! }));
       return { score: proj.scorecard?.overallScore, checks };
-    } catch (err) {
-      warn(`deps.dev lookup failed for ${name}@${version}: ${(err as Error).message}`);
-      return {};
-    }
-  });
+    });
+  } catch (err) {
+    warn(`deps.dev lookup failed for ${name}@${version}: ${(err as Error).message}`);
+    onDegraded?.('deps.dev');
+    return {};
+  }
 }

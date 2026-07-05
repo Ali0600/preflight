@@ -122,4 +122,8 @@ export interface Report {
   runtimeTarget?: RuntimeTarget;
   /** npm only: whether a lockfile expanded the graph (`false` = direct deps only — warn!). */
   lockfile?: boolean;
+  /** Data sources that failed to fetch this run (e.g. "CISA KEV", "FIRST EPSS"). When present,
+   * results are best-effort — an unreachable KEV feed means exploited-status is *unknown*, not
+   * "none", so a green `fail-level: kev` gate should be read with this caveat. Absent = all OK. */
+  degraded?: string[];
 }
