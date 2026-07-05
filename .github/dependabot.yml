@@ -1,0 +1,13 @@
+# Keep the SHA-pinned GitHub Actions fresh: Dependabot bumps the pin and updates the `# v4`
+# comment when a new release ships. Scoped to github-actions only — the npm tree is deliberately
+# not auto-bumped here (the web workspace is Next.js, a framework-pinned lockstep set; bumping its
+# packages independently is the exact failure mode Preflight itself warns about).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
