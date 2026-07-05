@@ -1,4 +1,4 @@
-import { analyzeFiles, setCacheEnabled, type Report } from '@preflight/core';
+import { analyzeFiles, GraphTooLargeError, setCacheEnabled, type Report } from '@preflight/core';
 
 // Keyless repo scan: the caller POSTs the manifest (+ lockfile) it already has — Preflight never
 // reaches for the repo itself. Runs on the Node runtime (the engine touches node:fs) and is never
@@ -13,6 +13,9 @@ setCacheEnabled(false); // serverless FS is read-only outside /tmp
 // This endpoint is keyless and public — bound the work: cap the body (a manifest + lockfile is
 // well under this), and never echo internal error text to the caller (log it server-side instead).
 const MAX_BODY = 8 * 1024 * 1024; // 8 MB
+// …and cap the dependency graph: an 8 MB lockfile can still enumerate tens of thousands of
+// packages, and each one fans out to OSV/registry/deps.dev. Real projects sit well under this.
+const MAX_DEPS = 5000;
 
 export async function POST(request: Request): Promise<Response> {
   const raw = await request.text();
@@ -32,9 +35,14 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
   try {
-    const report: Report = await analyzeFiles(files);
+    const report: Report = await analyzeFiles(files, { maxDeps: MAX_DEPS });
     return Response.json(report);
   } catch (err) {
+    // A graph over the cap is a limit, not an internal error — its message is self-authored
+    // (no path/internal leak), so surface it with a 413 rather than the generic 400.
+    if (err instanceof GraphTooLargeError) {
+      return Response.json({ error: err.message }, { status: 413 });
+    }
     // Unsupported/empty manifest, an unsafe key, or an upstream failure — log the detail, but
     // return a generic message so internal paths/errors don't leak to an unauthenticated caller.
     console.error('preflight /api/scan failed:', err);

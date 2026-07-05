@@ -25,13 +25,14 @@ import {
   introducedFindings,
   introducedKeys,
   newCveCount,
+  prGateFails,
   renderComment,
   renderPolicySection,
   renderRepoIssue,
-  shouldFail,
   ISSUE_MARKER,
   MARKER,
   type ManifestReport,
+  type SkippedManifest,
 } from './report';
 
 // package.json or requirements*.txt, anywhere in the tree.
@@ -65,9 +66,16 @@ async function run(): Promise<void> {
   const octokit = github.getOctokit(core.getInput('github-token'));
   const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput('fail-on-cve') !== 'false';
-  const failLevel = core.getInput('fail-level') || 'cve';
+  const failLevelInput = core.getInput('fail-level');
+  const failLevel = failLevelInput || 'cve';
   const policyFile = core.getInput('policy-file');
   const policy = policyFile ? loadPolicy(policyFile) : undefined;
+
+  // With a policy file the policy is authoritative and fail-level is ignored — say so, or a
+  // vuln-less policy silently stops gating CVEs even though fail-level looks set (mirrors the CLI).
+  if (policy && failLevelInput) {
+    core.warning('Preflight: policy-file governs the gate — the fail-level input is ignored.');
+  }
 
   if ((core.getInput('mode') || 'pr') === 'repo') {
     await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
@@ -118,6 +126,7 @@ async function runPrScan(
     runtimes: resolveRuntimes(policy),
   };
   const results: ManifestReport[] = [];
+  const skipped: SkippedManifest[] = [];
   for (const path of manifestPaths) {
     try {
       const report = await analyze(path, analyzeOpts); // head: checked-out file (+ lockfile) → OSV
@@ -131,12 +140,18 @@ async function runPrScan(
       const introduced = introducedKeys(baseTree, report.findings);
       if (changes.size > 0 || introduced.size > 0) results.push({ path, report, changes, introduced });
     } catch (err) {
-      core.warning(`Skipped ${path}: ${(err as Error).message}`);
+      // The primary OSV scan throws by design on an upstream/network failure (fail-closed), and a
+      // malformed manifest/lockfile throws too. Record it — a manifest we couldn't evaluate must
+      // NOT drop into a silent pass (the CLI exits non-zero on the same error). Fail closed below.
+      const message = (err as Error).message;
+      core.warning(`Could not scan ${path}: ${message}`);
+      skipped.push({ path, error: message });
     }
   }
 
   writeSarif(results.map((r) => r.report));
-  if (results.length === 0) {
+  // Only truly-nothing-to-do is a clean no-op: no changed manifests AND nothing failed to scan.
+  if (results.length === 0 && skipped.length === 0) {
     core.info('No added or bumped dependencies to report.');
     return;
   }
@@ -152,17 +167,26 @@ async function runPrScan(
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed),
+    renderComment(results, skipped) +
+      renderPolicySection(policyResult.violations, policyResult.suppressed),
   );
   core.setOutput('new-cves', newCveCount(results));
+  core.setOutput('scan-errors', skipped.length);
 
-  // With a policy, the policy decides; otherwise the fail-level does.
-  const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);
+  // Fail closed on an unscannable manifest; otherwise the policy (if any) or the fail-level decides.
+  const gateFail = prGateFails(results, skipped, {
+    hasPolicy: Boolean(policy),
+    policyFail: policyResult.fail,
+    failLevel,
+  });
   if (failOnCve && gateFail) {
-    const why = policy
-      ? `it violates the policy (${policyResult.violations.length} violation(s))`
-      : `it meets the fail threshold (fail-level: ${failLevel})`;
-    core.setFailed(`Preflight: this PR introduces a dependency that ${why}.`);
+    const why =
+      skipped.length > 0
+        ? `could not be fully scanned — ${skipped.length} manifest(s) failed (see the comment). Failing closed`
+        : policy
+          ? `introduces a dependency that violates the policy (${policyResult.violations.length} violation(s))`
+          : `introduces a dependency that meets the fail threshold (fail-level: ${failLevel})`;
+    core.setFailed(`Preflight: this PR ${why}.`);
   }
 }
 
@@ -177,20 +201,30 @@ async function runRepoScan(
   const paths = findManifests('.');
   core.info(`Scanning ${paths.length} manifest(s).`);
   const reports: Report[] = [];
+  const skipped: SkippedManifest[] = [];
   for (const path of paths) {
     try {
       reports.push(await analyze(path, { runtimes }));
     } catch (err) {
-      core.warning(`Skipped ${path}: ${(err as Error).message}`);
+      // Don't let a manifest we couldn't scan vanish into a clean "✅ no vulnerabilities" issue —
+      // record it so the outage is visible, and fail closed below.
+      const message = (err as Error).message;
+      core.warning(`Could not scan ${path}: ${message}`);
+      skipped.push({ path, error: message });
     }
   }
 
   writeSarif(reports);
-  const { body, count } = renderRepoIssue(reports);
-  await upsertIssue(octokit, owner, repo, body, count > 0);
+  const { body, count } = renderRepoIssue(reports, skipped);
+  await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   core.setOutput('vuln-count', count);
-  if (failOnCve && count > 0) {
-    core.setFailed(`Preflight: ${count} known vulnerability finding(s) across the repo's manifests.`);
+  core.setOutput('scan-errors', skipped.length);
+  if (failOnCve && (count > 0 || skipped.length > 0)) {
+    const detail =
+      skipped.length > 0
+        ? `${count} known vulnerability finding(s), and ${skipped.length} manifest(s) that failed to scan (failing closed)`
+        : `${count} known vulnerability finding(s) across the repo's manifests`;
+    core.setFailed(`Preflight: ${detail}.`);
   }
 }
 

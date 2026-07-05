@@ -6,6 +6,7 @@ import {
   diffDeclared,
   introducedKeys,
   newCveCount,
+  prGateFails,
   renderComment,
   renderPolicySection,
   renderRepoIssue,
@@ -13,6 +14,7 @@ import {
   ISSUE_MARKER,
   MARKER,
   type ManifestReport,
+  type SkippedManifest,
 } from '../src/report';
 
 function finding(name: string, verdict: Verdict, range = '^1.0.0'): Finding {
@@ -264,6 +266,49 @@ describe('renderRepoIssue (scheduled scan)', () => {
     const { body, count } = renderRepoIssue([report([finding('fine', 'safe')])]);
     expect(count).toBe(0);
     expect(body).toContain('No known vulnerabilities');
+  });
+
+  it('surfaces manifests that failed to scan instead of a bare all-clear (#1 audit)', () => {
+    const skipped: SkippedManifest[] = [{ path: 'backend/requirements.txt', error: 'OSV querybatch failed: 503' }];
+    const { body } = renderRepoIssue([report([finding('fine', 'safe')])], skipped);
+    expect(body).toContain('Could not scan');
+    expect(body).toContain('backend/requirements.txt');
+    expect(body).toContain('OSV querybatch failed: 503');
+    expect(body).not.toContain('No known vulnerabilities in the scanned manifests. ✅'); // not a clean all-clear
+  });
+});
+
+describe('scan-failure fail-closed (#1 audit — the Action must not go green on a scan it couldn’t run)', () => {
+  const clean = mr({
+    report: report([finding('ok', 'safe')]),
+    changes: new Map([['ok', 'added']] as const),
+    introduced: keysOf(finding('ok', 'safe')),
+  });
+  const skipped: SkippedManifest[] = [{ path: 'package.json', error: 'OSV querybatch failed: 503' }];
+
+  it('prGateFails: a skipped manifest fails the gate even when the scanned results are clean', () => {
+    expect(prGateFails([clean], [], { hasPolicy: false, policyFail: false, failLevel: 'cve' })).toBe(false);
+    expect(prGateFails([clean], skipped, { hasPolicy: false, policyFail: false, failLevel: 'cve' })).toBe(true);
+  });
+
+  it('prGateFails: with no skips, delegates to the policy / fail-level decision', () => {
+    expect(prGateFails([clean], [], { hasPolicy: true, policyFail: true, failLevel: 'cve' })).toBe(true);
+    expect(prGateFails([clean], [], { hasPolicy: true, policyFail: false, failLevel: 'cve' })).toBe(false);
+  });
+
+  it('renderComment: surfaces the un-scanned manifest and a ❌ failing-closed verdict', () => {
+    const body = renderComment([clean], skipped);
+    expect(body).toContain('Could not scan 1 manifest(s) — failing closed');
+    expect(body).toContain('OSV querybatch failed: 503');
+    expect(body).toContain('Failing closed');
+    expect(body).not.toContain('✅ **No new CVEs'); // the green line must be suppressed
+  });
+
+  it('renderComment: an all-skipped PR (no results) never reads as the clean no-op', () => {
+    const body = renderComment([], skipped);
+    expect(body).not.toContain('No added or bumped dependencies in this PR. ✅');
+    expect(body).toContain('Could not scan');
+    expect(body).toContain('Failing closed');
   });
 });
 

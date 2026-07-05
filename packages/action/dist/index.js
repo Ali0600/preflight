@@ -25349,11 +25349,24 @@ function toSarif(reports) {
 var import_node_fs5 = require("fs");
 var import_node_os2 = require("os");
 var import_node_path4 = require("path");
+var GraphTooLargeError = class extends Error {
+  constructor(count, max) {
+    super(`Dependency graph too large: ${count} deps (max ${max}). Scan locally with the CLI instead.`);
+    this.count = count;
+    this.max = max;
+    this.name = "GraphTooLargeError";
+  }
+  count;
+  max;
+};
 async function analyze(path, opts = {}) {
   return analyzeManifest(parseManifest(path), opts);
 }
 async function analyzeManifest(manifest, opts = {}) {
   const { dependencies, ecosystem } = manifest;
+  if (opts.maxDeps !== void 0 && dependencies.length > opts.maxDeps) {
+    throw new GraphTooLargeError(dependencies.length, opts.maxDeps);
+  }
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
   const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
@@ -25525,6 +25538,10 @@ function changedFindings({ report, changes }) {
 function shouldFail(results, level) {
   return results.some((r) => introducedFindings(r).some((f) => meetsVulnLevel(f, level)));
 }
+function prGateFails(results, skipped, gate) {
+  if (skipped.length > 0) return true;
+  return gate.hasPolicy ? gate.policyFail : shouldFail(results, gate.failLevel);
+}
 function preexistingTransitiveCves(results) {
   return results.flatMap(
     (r) => r.report.findings.filter(
@@ -25532,7 +25549,7 @@ function preexistingTransitiveCves(results) {
     )
   );
 }
-function renderRepoIssue(reports) {
+function renderRepoIssue(reports, skipped = []) {
   const risky = (r) => r.findings.filter((f) => f.verdict === "malware" || f.verdict === "cve");
   const lines = [ISSUE_MARKER, "## \u2708\uFE0F Preflight \u2014 scheduled dependency scan", ""];
   let count = 0;
@@ -25548,7 +25565,16 @@ function renderRepoIssue(reports) {
     }
     lines.push("");
   }
-  if (count === 0) lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+  if (count === 0 && skipped.length === 0) {
+    lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+  } else if (count === 0) {
+    lines.push("No known vulnerabilities in the manifests that scanned \u2014 but some could not be scanned (below). \u26A0\uFE0F", "");
+  }
+  if (skipped.length > 0) {
+    lines.push("### \u26A0\uFE0F Could not scan", "", "| Manifest | Error |", "| --- | --- |");
+    for (const s of skipped) lines.push(`| \`${cell(s.path)}\` | ${cell(s.error)} |`);
+    lines.push("");
+  }
   const degraded = [...new Set(reports.flatMap((r) => r.degraded ?? []))];
   if (degraded.length > 0) {
     lines.push(
@@ -25560,10 +25586,10 @@ function renderRepoIssue(reports) {
   return { body: lines.join("\n"), count };
 }
 var TRANSITIVE_ROWS = 10;
-function renderComment(results) {
+function renderComment(results, skipped = []) {
   const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
   const lines = [MARKER, "## \u2708\uFE0F Preflight \u2014 dependency check", ""];
-  if (active.length === 0) {
+  if (active.length === 0 && skipped.length === 0) {
     lines.push("No added or bumped dependencies in this PR. \u2705");
     return lines.join("\n");
   }
@@ -25624,11 +25650,34 @@ function renderComment(results) {
       ""
     );
   }
+  if (skipped.length > 0) {
+    lines.push(
+      `#### \u26A0\uFE0F Could not scan ${skipped.length} manifest(s) \u2014 failing closed`,
+      "",
+      "| Manifest | Error |",
+      "| --- | --- |"
+    );
+    for (const s of skipped) lines.push(`| \`${cell(s.path)}\` | ${cell(s.error)} |`);
+    lines.push(
+      "",
+      "<sub>A scan that could not run is treated as a failure, not a pass (the `preflight` CLI exits non-zero on the same error). Re-run once the data source recovers.</sub>",
+      ""
+    );
+  }
   const newCves = newCveCount(results);
   lines.push("---");
-  lines.push(
-    newCves > 0 ? `\u274C **This PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE or malicious advisory (direct and transitive counted).**` : "\u2705 **No new CVEs introduced (direct and transitive checked).**"
-  );
+  if (newCves > 0) {
+    lines.push(
+      `\u274C **This PR introduces ${newCves} ${newCves === 1 ? "dependency" : "dependencies"} with a known CVE or malicious advisory (direct and transitive counted).**`
+    );
+  }
+  if (skipped.length > 0) {
+    lines.push(
+      `\u274C **Preflight could not fully evaluate this PR \u2014 ${skipped.length} manifest(s) failed to scan (above). Failing closed.**`
+    );
+  } else if (newCves === 0) {
+    lines.push("\u2705 **No new CVEs introduced (direct and transitive checked).**");
+  }
   const degraded = [...new Set(results.flatMap((r) => r.report.degraded ?? []))];
   if (degraded.length > 0) {
     lines.push(
@@ -25663,9 +25712,13 @@ async function run() {
   const octokit = github.getOctokit(core.getInput("github-token"));
   const { owner, repo } = github.context.repo;
   const failOnCve = core.getInput("fail-on-cve") !== "false";
-  const failLevel = core.getInput("fail-level") || "cve";
+  const failLevelInput = core.getInput("fail-level");
+  const failLevel = failLevelInput || "cve";
   const policyFile = core.getInput("policy-file");
   const policy = policyFile ? loadPolicy(policyFile) : void 0;
+  if (policy && failLevelInput) {
+    core.warning("Preflight: policy-file governs the gate \u2014 the fail-level input is ignored.");
+  }
   if ((core.getInput("mode") || "pr") === "repo") {
     await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
   } else {
@@ -25701,6 +25754,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     runtimes: resolveRuntimes(policy)
   };
   const results = [];
+  const skipped = [];
   for (const path of manifestPaths) {
     try {
       const report = await analyze(path, analyzeOpts);
@@ -25712,11 +25766,13 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
       const introduced = introducedKeys(baseTree, report.findings);
       if (changes.size > 0 || introduced.size > 0) results.push({ path, report, changes, introduced });
     } catch (err) {
-      core.warning(`Skipped ${path}: ${err.message}`);
+      const message = err.message;
+      core.warning(`Could not scan ${path}: ${message}`);
+      skipped.push({ path, error: message });
     }
   }
   writeSarif(results.map((r) => r.report));
-  if (results.length === 0) {
+  if (results.length === 0 && skipped.length === 0) {
     core.info("No added or bumped dependencies to report.");
     return;
   }
@@ -25726,32 +25782,42 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     owner,
     repo,
     issue_number,
-    renderComment(results) + renderPolicySection(policyResult.violations, policyResult.suppressed)
+    renderComment(results, skipped) + renderPolicySection(policyResult.violations, policyResult.suppressed)
   );
   core.setOutput("new-cves", newCveCount(results));
-  const gateFail = policy ? policyResult.fail : shouldFail(results, failLevel);
+  core.setOutput("scan-errors", skipped.length);
+  const gateFail = prGateFails(results, skipped, {
+    hasPolicy: Boolean(policy),
+    policyFail: policyResult.fail,
+    failLevel
+  });
   if (failOnCve && gateFail) {
-    const why = policy ? `it violates the policy (${policyResult.violations.length} violation(s))` : `it meets the fail threshold (fail-level: ${failLevel})`;
-    core.setFailed(`Preflight: this PR introduces a dependency that ${why}.`);
+    const why = skipped.length > 0 ? `could not be fully scanned \u2014 ${skipped.length} manifest(s) failed (see the comment). Failing closed` : policy ? `introduces a dependency that violates the policy (${policyResult.violations.length} violation(s))` : `introduces a dependency that meets the fail threshold (fail-level: ${failLevel})`;
+    core.setFailed(`Preflight: this PR ${why}.`);
   }
 }
 async function runRepoScan(octokit, owner, repo, failOnCve, runtimes) {
   const paths = findManifests(".");
   core.info(`Scanning ${paths.length} manifest(s).`);
   const reports = [];
+  const skipped = [];
   for (const path of paths) {
     try {
       reports.push(await analyze(path, { runtimes }));
     } catch (err) {
-      core.warning(`Skipped ${path}: ${err.message}`);
+      const message = err.message;
+      core.warning(`Could not scan ${path}: ${message}`);
+      skipped.push({ path, error: message });
     }
   }
   writeSarif(reports);
-  const { body, count } = renderRepoIssue(reports);
-  await upsertIssue(octokit, owner, repo, body, count > 0);
+  const { body, count } = renderRepoIssue(reports, skipped);
+  await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   core.setOutput("vuln-count", count);
-  if (failOnCve && count > 0) {
-    core.setFailed(`Preflight: ${count} known vulnerability finding(s) across the repo's manifests.`);
+  core.setOutput("scan-errors", skipped.length);
+  if (failOnCve && (count > 0 || skipped.length > 0)) {
+    const detail = skipped.length > 0 ? `${count} known vulnerability finding(s), and ${skipped.length} manifest(s) that failed to scan (failing closed)` : `${count} known vulnerability finding(s) across the repo's manifests`;
+    core.setFailed(`Preflight: ${detail}.`);
   }
 }
 function writeSarif(reports) {

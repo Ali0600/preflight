@@ -1,4 +1,10 @@
-import { analyzeContent, setCacheEnabled, type Report, type RuntimeName } from '@preflight/core';
+import {
+  analyzeContent,
+  GraphTooLargeError,
+  setCacheEnabled,
+  type Report,
+  type RuntimeName,
+} from '@preflight/core';
 
 // The engine touches node:fs/crypto (its disk cache), so this must run on the Node runtime,
 // and never be statically cached — each paste is a fresh analysis.
@@ -10,6 +16,8 @@ setCacheEnabled(false);
 
 // Public + keyless — cap the body and don't echo internal error text to the caller.
 const MAX_BODY = 8 * 1024 * 1024; // 8 MB
+// Bound the dependency graph too (a paste is direct-only, but keep the guard consistent).
+const MAX_DEPS = 5000;
 
 export async function POST(request: Request): Promise<Response> {
   const raw = await request.text();
@@ -32,12 +40,17 @@ export async function POST(request: Request): Promise<Response> {
     const report: Report = await analyzeContent(filename || 'package.json', content, {
       latest: true,
       health: Boolean(health),
+      maxDeps: MAX_DEPS,
       runtimes: version
         ? { [name]: { runtime: name, version, source: 'dashboard input', explicit: true } }
         : undefined,
     });
     return Response.json(report);
   } catch (err) {
+    // A graph over the cap is a self-authored limit message — surface it as 413, not the generic 400.
+    if (err instanceof GraphTooLargeError) {
+      return Response.json({ error: err.message }, { status: 413 });
+    }
     console.error('preflight /api/analyze failed:', err);
     return Response.json(
       { error: 'Could not analyze the manifest — ensure it is a valid package.json or requirements.txt.' },

@@ -84,6 +84,13 @@ export interface ManifestReport {
   introduced: Set<string>;
 }
 
+/** A manifest the Action could not scan (the primary OSV fetch threw, or the manifest/lockfile
+ * was unparseable). A scan that could NOT run is fail-closed — never a silent pass. */
+export interface SkippedManifest {
+  path: string;
+  error: string;
+}
+
 /** The identity a dependency has in a tree diff: its resolved version when known, else its range. */
 export function depKey(d: { name: string; version?: string; range: string }): string {
   return `${d.name}@${d.version ?? d.range}`;
@@ -136,6 +143,19 @@ export function shouldFail(results: ManifestReport[], level: string): boolean {
   return results.some((r) => introducedFindings(r).some((f) => meetsVulnLevel(f, level)));
 }
 
+/** The full PR gate decision: fail if ANY manifest could not be scanned (fail-closed — a scan
+ * that didn't run is not a pass, matching the CLI which exits non-zero on the same error), OR
+ * the introduced findings trip the policy / fail-level. Pure so it's testable without octokit —
+ * `index.ts` (the octokit glue) just calls this. */
+export function prGateFails(
+  results: ManifestReport[],
+  skipped: SkippedManifest[],
+  gate: { hasPolicy: boolean; policyFail: boolean; failLevel: string },
+): boolean {
+  if (skipped.length > 0) return true;
+  return gate.hasPolicy ? gate.policyFail : shouldFail(results, gate.failLevel);
+}
+
 /** Transitive CVE carriers that were ALREADY in the base tree — informational, not this PR's doing. */
 function preexistingTransitiveCves(results: ManifestReport[]) {
   return results.flatMap((r) =>
@@ -145,8 +165,12 @@ function preexistingTransitiveCves(results: ManifestReport[]) {
   );
 }
 
-/** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests. */
-export function renderRepoIssue(reports: Report[]): { body: string; count: number } {
+/** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests.
+ * `skipped` carries manifests that failed to scan — listed so an outage isn't invisible. */
+export function renderRepoIssue(
+  reports: Report[],
+  skipped: SkippedManifest[] = [],
+): { body: string; count: number } {
   const risky = (r: Report) =>
     r.findings.filter((f) => f.verdict === 'malware' || f.verdict === 'cve');
   const lines = [ISSUE_MARKER, '## ✈️ Preflight — scheduled dependency scan', ''];
@@ -165,7 +189,18 @@ export function renderRepoIssue(reports: Report[]): { body: string; count: numbe
     lines.push('');
   }
 
-  if (count === 0) lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+  // Only an all-clean, fully-scanned run gets the green line — a run with un-scanned manifests
+  // must say so, not imply the repo is clear.
+  if (count === 0 && skipped.length === 0) {
+    lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+  } else if (count === 0) {
+    lines.push('No known vulnerabilities in the manifests that scanned — but some could not be scanned (below). ⚠️', '');
+  }
+  if (skipped.length > 0) {
+    lines.push('### ⚠️ Could not scan', '', '| Manifest | Error |', '| --- | --- |');
+    for (const s of skipped) lines.push(`| \`${cell(s.path)}\` | ${cell(s.error)} |`);
+    lines.push('');
+  }
   const degraded = [...new Set(reports.flatMap((r) => r.degraded ?? []))];
   if (degraded.length > 0) {
     lines.push(
@@ -180,14 +215,17 @@ export function renderRepoIssue(reports: Report[]): { body: string; count: numbe
 /** Rows shown for introduced-transitive findings before collapsing to "+N more". */
 const TRANSITIVE_ROWS = 10;
 
-/** Render the full sticky PR comment (Markdown). Returns just the body. */
-export function renderComment(results: ManifestReport[]): string {
+/** Render the full sticky PR comment (Markdown). Returns just the body. `skipped` carries any
+ * manifests that failed to scan — surfaced as a fail-closed section, never silently dropped. */
+export function renderComment(results: ManifestReport[], skipped: SkippedManifest[] = []): string {
   // A manifest is worth a section when its declared deps changed OR the tree changed
   // (a lockfile-only PR has changes.size === 0 but still introduces packages).
   const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
   const lines = [MARKER, '## ✈️ Preflight — dependency check', ''];
 
-  if (active.length === 0) {
+  // Only the genuinely-nothing case gets the green all-clear: no changes AND nothing failed to
+  // scan. A scan failure with no other changes must NOT read as "✅ nothing to do".
+  if (active.length === 0 && skipped.length === 0) {
     lines.push('No added or bumped dependencies in this PR. ✅');
     return lines.join('\n');
   }
@@ -261,13 +299,38 @@ export function renderComment(results: ManifestReport[]): string {
     );
   }
 
+  // A manifest we couldn't scan is a fail-closed condition — spell it out rather than let a
+  // green check imply the tree was cleared. Distinct from a *degraded* scan (which ran but lost
+  // a secondary source): here the primary scan didn't run at all.
+  if (skipped.length > 0) {
+    lines.push(
+      `#### ⚠️ Could not scan ${skipped.length} manifest(s) — failing closed`,
+      '',
+      '| Manifest | Error |',
+      '| --- | --- |',
+    );
+    for (const s of skipped) lines.push(`| \`${cell(s.path)}\` | ${cell(s.error)} |`);
+    lines.push(
+      '',
+      '<sub>A scan that could not run is treated as a failure, not a pass (the `preflight` CLI exits non-zero on the same error). Re-run once the data source recovers.</sub>',
+      '',
+    );
+  }
+
   const newCves = newCveCount(results);
   lines.push('---');
-  lines.push(
-    newCves > 0
-      ? `❌ **This PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE or malicious advisory (direct and transitive counted).**`
-      : '✅ **No new CVEs introduced (direct and transitive checked).**',
-  );
+  if (newCves > 0) {
+    lines.push(
+      `❌ **This PR introduces ${newCves} ${newCves === 1 ? 'dependency' : 'dependencies'} with a known CVE or malicious advisory (direct and transitive counted).**`,
+    );
+  }
+  if (skipped.length > 0) {
+    lines.push(
+      `❌ **Preflight could not fully evaluate this PR — ${skipped.length} manifest(s) failed to scan (above). Failing closed.**`,
+    );
+  } else if (newCves === 0) {
+    lines.push('✅ **No new CVEs introduced (direct and transitive checked).**');
+  }
   const degraded = [...new Set(results.flatMap((r) => r.report.degraded ?? []))];
   if (degraded.length > 0) {
     lines.push(
