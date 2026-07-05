@@ -41,6 +41,14 @@ describe('parseManifest — npm', () => {
     });
   });
 
+  it('propagates the lockfile dev flag to transitives — prod-reachable stays dev: false (#33)', () => {
+    // tinypool/tinyspy are only reachable via vitest (a devDependency): lockfile "dev": true.
+    expect(m.dependencies.find((d) => d.name === 'tinypool')?.dev).toBe(true);
+    expect(m.dependencies.find((d) => d.name === 'tinyspy')?.dev).toBe(true);
+    // left-pad is a real dependency — no dev flag in the lockfile → prod scope.
+    expect(m.dependencies.find((d) => d.name === 'left-pad')?.dev).toBe(false);
+  });
+
   it('records that a lockfile expanded the graph', () => {
     expect(m.lockfile).toBe(true);
   });

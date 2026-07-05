@@ -13,6 +13,8 @@ export interface Dependency {
   range: string;
   /** Resolved/installed version, when a lockfile was available (drives OSV queries). */
   version?: string;
+  /** A devDependency (direct) or only reachable via devDependencies (transitive —
+   * the npm lockfile's `dev` flag). Build-time scope, absent from the shipped artifact. */
   dev: boolean;
   /** Declared in the manifest (`true`) vs pulled in transitively from the lockfile (`false`).
    * Optional so hand-built objects/tests default to direct; the parser always sets it. */

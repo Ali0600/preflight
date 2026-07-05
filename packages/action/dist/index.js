@@ -24001,7 +24001,9 @@ function enumerateNpmGraph(lock, declared) {
       name,
       range: "",
       version: entry.version,
-      dev: false,
+      // The lockfile marks packages only reachable via devDependencies (`"dev": true`) —
+      // propagate it, or a prod-scope-only policy would misfire on build-tool CVEs (#33).
+      dev: entry.dev === true,
       direct: false,
       installScript: entry.hasInstallScript || void 0
     });
@@ -24611,6 +24613,8 @@ function decideVerdict(f) {
 }
 
 // ../core/src/policy.ts
+var SEVERITY_FLOOR = { low: 1, medium: 2, high: 3, critical: 4 };
+var severityRank = (s) => SEVERITY_FLOOR[s] ?? 1;
 function meetsVulnLevel(f, level) {
   if (f.verdict === "malware") return true;
   if (f.verdict !== "cve") return false;
@@ -24618,6 +24622,11 @@ function meetsVulnLevel(f, level) {
   if (level.startsWith("epss:")) {
     const t = Number(level.slice(5)) || 0;
     return f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t);
+  }
+  if (level.startsWith("severity:")) {
+    const floor = SEVERITY_FLOOR[level.slice("severity:".length).toLowerCase()];
+    if (floor === void 0) return true;
+    return f.vulns.some((v) => v.kev || severityRank(v.severity) >= floor);
   }
   return true;
 }

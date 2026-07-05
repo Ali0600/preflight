@@ -45,8 +45,15 @@ export interface Violation {
   detail: string;
 }
 
+const SEVERITY_FLOOR: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+/** Unrated advisories rank as low: the lowest floor still catches everything, and higher
+ * floors exclude them *explicitly* rather than by a silent hole in the gate. */
+const severityRank = (s: string): number => SEVERITY_FLOOR[s] ?? 1;
+
 /** Whether a finding's vulnerabilities meet the threshold. Malware always qualifies; shared with
- * the Action's PR gate so "cve/kev/epss:x" means the same thing everywhere. */
+ * the CLI's --fail-level and the Action's fail-level/policy so every surface means the same thing.
+ * Levels: 'cve' (any), 'kev', 'epss:<0-1>', 'severity:<low|medium|high|critical>' (#35).
+ * A KEV'd advisory passes ANY threshold — confirmed exploitation beats a severity label. */
 export function meetsVulnLevel(f: Finding, level: string): boolean {
   if (f.verdict === 'malware') return true;
   if (f.verdict !== 'cve') return false;
@@ -54,6 +61,13 @@ export function meetsVulnLevel(f: Finding, level: string): boolean {
   if (level.startsWith('epss:')) {
     const t = Number(level.slice(5)) || 0;
     return f.vulns.some((v) => v.kev || (v.epss ?? 0) >= t);
+  }
+  if (level.startsWith('severity:')) {
+    const floor = SEVERITY_FLOOR[level.slice('severity:'.length).toLowerCase()];
+    // An unrecognized floor degrades to the STRICTER 'cve' behavior — a typo must
+    // never silently weaken the gate.
+    if (floor === undefined) return true;
+    return f.vulns.some((v) => v.kev || severityRank(v.severity) >= floor);
   }
   return true; // 'cve' (default)
 }
