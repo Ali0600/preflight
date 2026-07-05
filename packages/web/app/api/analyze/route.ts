@@ -8,18 +8,25 @@ export const dynamic = 'force-dynamic';
 // Serverless filesystems are read-only outside /tmp; skip the on-disk cache here.
 setCacheEnabled(false);
 
+// Public + keyless — cap the body and don't echo internal error text to the caller.
+const MAX_BODY = 8 * 1024 * 1024; // 8 MB
+
 export async function POST(request: Request): Promise<Response> {
+  const raw = await request.text();
+  if (raw.length > MAX_BODY) {
+    return Response.json({ error: 'Request body too large.' }, { status: 413 });
+  }
+  let body: { filename?: string; content?: string; health?: boolean; runtime?: string };
   try {
-    const { filename, content, health, runtime } = (await request.json()) as {
-      filename?: string;
-      content?: string;
-      health?: boolean;
-      /** Optional target runtime version for the pasted manifest's ecosystem, e.g. "3.9". */
-      runtime?: string;
-    };
-    if (!content?.trim()) {
-      return Response.json({ error: 'Paste a manifest first.' }, { status: 400 });
-    }
+    body = JSON.parse(raw);
+  } catch {
+    return Response.json({ error: 'Invalid JSON.' }, { status: 400 });
+  }
+  const { filename, content, health, runtime } = body;
+  if (!content?.trim()) {
+    return Response.json({ error: 'Paste a manifest first.' }, { status: 400 });
+  }
+  try {
     const name: RuntimeName = /requirements/i.test(filename ?? '') ? 'python' : 'node';
     const version = runtime?.trim();
     const report: Report = await analyzeContent(filename || 'package.json', content, {
@@ -31,7 +38,10 @@ export async function POST(request: Request): Promise<Response> {
     });
     return Response.json(report);
   } catch (err) {
-    // Bad JSON, an unsupported manifest, or an upstream failure — surface the message.
-    return Response.json({ error: (err as Error).message }, { status: 400 });
+    console.error('preflight /api/analyze failed:', err);
+    return Response.json(
+      { error: 'Could not analyze the manifest — ensure it is a valid package.json or requirements.txt.' },
+      { status: 400 },
+    );
   }
 }

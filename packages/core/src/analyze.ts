@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 import { fetchHealth, type HealthInfo } from './depsdev';
 import { fetchEpss } from './epss';
@@ -60,10 +60,17 @@ export async function analyzeFiles(
   opts: AnalyzeOptions = {},
 ): Promise<Report> {
   const dir = mkdtempSync(join(tmpdir(), 'preflight-'));
+  const root = resolve(dir);
   try {
     let manifestPath: string | undefined;
     for (const [name, content] of Object.entries(files)) {
-      const p = join(dir, name);
+      const p = resolve(join(dir, name));
+      // The keys come from an untrusted caller (the public /api/scan). A key like `../../x`
+      // would otherwise write outside the temp dir — arbitrary file write. Reject anything that
+      // escapes the sandbox; legitimate sub-paths (e.g. `backend/package.json`) resolve inside it.
+      if (p !== root && !p.startsWith(root + sep)) {
+        throw new Error(`Unsafe file path in request: ${name}`);
+      }
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content);
       if (/(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i.test(name)) manifestPath ??= p;

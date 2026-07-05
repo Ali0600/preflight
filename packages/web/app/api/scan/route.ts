@@ -10,19 +10,37 @@ export const maxDuration = 60;
 
 setCacheEnabled(false); // serverless FS is read-only outside /tmp
 
+// This endpoint is keyless and public — bound the work: cap the body (a manifest + lockfile is
+// well under this), and never echo internal error text to the caller (log it server-side instead).
+const MAX_BODY = 8 * 1024 * 1024; // 8 MB
+
 export async function POST(request: Request): Promise<Response> {
+  const raw = await request.text();
+  if (raw.length > MAX_BODY) {
+    return Response.json({ error: 'Request body too large.' }, { status: 413 });
+  }
+  let files: Record<string, string> | undefined;
   try {
-    const { files } = (await request.json()) as { files?: Record<string, string> };
-    if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
-      return Response.json(
-        { error: 'POST { files: { "package.json": "…", "package-lock.json": "…" } }' },
-        { status: 400 },
-      );
-    }
+    ({ files } = JSON.parse(raw) as { files?: Record<string, string> });
+  } catch {
+    return Response.json({ error: 'Invalid JSON.' }, { status: 400 });
+  }
+  if (!files || typeof files !== 'object' || Object.keys(files).length === 0) {
+    return Response.json(
+      { error: 'POST { files: { "package.json": "…", "package-lock.json": "…" } }' },
+      { status: 400 },
+    );
+  }
+  try {
     const report: Report = await analyzeFiles(files);
     return Response.json(report);
   } catch (err) {
-    // unsupported/empty manifest, bad JSON, or an upstream failure
-    return Response.json({ error: (err as Error).message }, { status: 400 });
+    // Unsupported/empty manifest, an unsafe key, or an upstream failure — log the detail, but
+    // return a generic message so internal paths/errors don't leak to an unauthenticated caller.
+    console.error('preflight /api/scan failed:', err);
+    return Response.json(
+      { error: 'Could not analyze the manifest — ensure it is a valid package.json (+ lockfile).' },
+      { status: 400 },
+    );
   }
 }

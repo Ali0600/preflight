@@ -41,6 +41,20 @@ describe('analyzeFiles', () => {
     await expect(analyzeFiles({ 'README.md': '# hi' })).rejects.toThrow(/No package\.json/);
   });
 
+  it('rejects a key that escapes the temp dir — path traversal (#2)', async () => {
+    await expect(
+      analyzeFiles({ '../evil.txt': 'pwned', 'package.json': '{}' }),
+    ).rejects.toThrow(/Unsafe file path/);
+    await expect(analyzeFiles({ '../../etc/x': 'pwned' })).rejects.toThrow(/Unsafe file path/);
+  });
+
+  it('allows a legitimate sub-path inside the sandbox', async () => {
+    const report = await analyzeFiles({
+      'backend/package.json': JSON.stringify({ dependencies: {} }),
+    });
+    expect(report.total).toBe(0); // resolved & analyzed, no traversal
+  });
+
   it('flags a lockfile-less npm scan (direct deps only) so callers can warn (#23)', async () => {
     const report = await analyzeFiles({
       'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.3.0' } }),
