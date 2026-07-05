@@ -51,8 +51,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   (scheduled) scans every committed manifest → tracking issue. Writes `preflight.sarif` (uploaded
   to the Security tab). `report.ts` pure/testable; `index.ts` octokit glue. **Committed**
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
-  changes, or the shipped action silently runs stale core). Workflows: `preflight.yml` (PR),
-  `preflight-schedule.yml` (cron), `release.yml` (tag → `npm publish @preflight/cli --provenance`).
+  changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
+  and runs `git diff --exit-code -- packages/action/dist`, so a forgotten rebuild fails the build.
+  Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml` (tag → `npm publish
+  @preflight/cli --provenance`); third-party `uses:` are SHA-pinned (Dependabot `github-actions` bumps them).
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` (`analyzeContent()`) → metric cards + findings, matching `docs/dashboard-mockup.html`.
   Also `POST /api/scan` (`analyzeFiles()`, keyless — caller posts manifest+lockfile, `maxDuration=60`
@@ -82,6 +84,12 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   npm + PyPI shapes are now **verified** (deps.dev needs UPPERCASE `NPM`/`PYPI` in the path, and the
   scorecard hangs off the `SOURCE_REPO` related project — both handled in `depsdev.ts`).
 - All APIs are **keyless** — never hardcode secrets. GitHub OAuth (stage 3) is deferred config.
+- **Data-source fetchers must fail loud, never silent.** A new client (like `kev`/`epss`/`registry`/
+  `depsdev`/`osv`/`runtimes`) must **throw inside `cached()` on failure** (a throwing compute is never
+  persisted — so a transient outage can't poison the 24h cache and silently weaken a gate), `catch`
+  above to degrade gracefully, and call the `onDegraded(source)` callback so `Report.degraded` surfaces
+  it in the CLI/Action. A `404` is a legitimate cacheable empty; an empty-that-should-never-be-empty
+  (e.g. the KEV catalog) is a failure. Never reintroduce `catch { return [] }` inside a `cached()` body.
 - **The lockstep registry is data-driven** so it's trivial to extend (Expo/Angular/Nx + Next.js/Nuxt/
   SvelteKit/Remix/Astro are seeded). Next to add: pip (Django) — and gem (Rails) once a Gemfile parser
   exists, else that data is dead. Be conservative: a false `pinned` is bad advice (we omit bare
