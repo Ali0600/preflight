@@ -55,6 +55,20 @@ describe('analyzeFiles', () => {
     expect(report.total).toBe(0); // resolved & analyzed, no traversal
   });
 
+  it('reports a data-source ledger — OSV ran, exploit-prioritization skipped with no CVEs', async () => {
+    const report = await analyzeFiles({
+      'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.3.0' } }),
+    });
+    const byName = (needle: string) => report.sources?.find((s) => s.name.includes(needle));
+    expect(byName('OSV.dev')?.status).toBe('ok');
+    expect(byName('OSV.dev')?.detail).toContain('scanned 1 package');
+    // No CVEs → KEV/EPSS were never queried, shown as skipped (not silently omitted).
+    expect(byName('KEV')?.status).toBe('skipped');
+    // --latest / --health off by default → registry + deps.dev shown as skipped, not run.
+    expect(byName('freshness')?.status).toBe('skipped');
+    expect(byName('deps.dev')?.status).toBe('skipped');
+  });
+
   it('rejects a graph over maxDeps BEFORE any fetch — bounds public fan-out (#2 audit)', async () => {
     const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchSpy);

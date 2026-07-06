@@ -112,6 +112,18 @@ export interface Finding {
   reason: string;
 }
 
+/** One data source Preflight consults, and what it contributed this run — so a scan is
+ * transparent about *what it checked*, not just what it found. `ok` = queried successfully;
+ * `degraded` = queried but unreachable (results best-effort); `skipped` = not needed this run
+ * (no CVEs to prioritize) or not enabled (needs `--latest`/`--health`/a runtime target). */
+export interface DataSource {
+  /** Provider + what it provides, e.g. "OSV.dev (advisories)", "CISA KEV (exploited)". */
+  name: string;
+  status: 'ok' | 'degraded' | 'skipped';
+  /** One-line result, e.g. "scanned 342 packages → 3 advisories in 2 packages". */
+  detail: string;
+}
+
 export interface Report {
   ecosystem: Ecosystem;
   path: string;
@@ -126,4 +138,7 @@ export interface Report {
    * results are best-effort — an unreachable KEV feed means exploited-status is *unknown*, not
    * "none", so a green `fail-level: kev` gate should be read with this caveat. Absent = all OK. */
   degraded?: string[];
+  /** Every data source Preflight consulted (or skipped) this run and what it returned — the
+   * transparency ledger surfaced in the CLI/Action so "what did this actually check?" is visible. */
+  sources?: DataSource[];
 }

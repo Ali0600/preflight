@@ -1,7 +1,8 @@
-import type { Finding, Report, Verdict } from '@preflight/core';
+import type { DataSource, Finding, Report, Verdict } from '@preflight/core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  aggregateSources,
   depKey,
   diffDeclared,
   introducedKeys,
@@ -10,6 +11,7 @@ import {
   renderComment,
   renderPolicySection,
   renderRepoIssue,
+  renderSources,
   shouldFail,
   ISSUE_MARKER,
   MARKER,
@@ -309,6 +311,51 @@ describe('scan-failure fail-closed (#1 audit — the Action must not go green on
     expect(body).not.toContain('No added or bumped dependencies in this PR. ✅');
     expect(body).toContain('Could not scan');
     expect(body).toContain('Failing closed');
+  });
+});
+
+describe('renderSources — data-source transparency ledger', () => {
+  const sources: DataSource[] = [
+    { name: 'OSV.dev (advisories)', status: 'ok', detail: 'scanned 3 package version(s) → 0 advisories' },
+    { name: 'CISA KEV · FIRST EPSS (exploit prioritization)', status: 'skipped', detail: 'not needed — no CVEs to prioritize' },
+    { name: 'npm registry (freshness + license)', status: 'degraded', detail: 'unreachable — latest versions/licenses may be missing' },
+  ];
+
+  it('renders a table with a status icon per source', () => {
+    const out = renderSources(sources).join('\n');
+    expect(out).toContain('📡 Data sources');
+    expect(out).toContain('✅ OSV.dev (advisories)');
+    expect(out).toContain('➖ CISA KEV'); // skipped
+    expect(out).toContain('⚠️ npm registry'); // degraded
+    expect(out).toContain('scanned 3 package');
+  });
+
+  it('is empty when there are no sources', () => {
+    expect(renderSources(undefined)).toEqual([]);
+    expect(renderSources([])).toEqual([]);
+  });
+
+  it('aggregateSources keeps the worst status a source saw across manifests', () => {
+    const a = report([finding('ok', 'safe')]);
+    const b = report([finding('ok', 'safe')]);
+    a.sources = [{ name: 'CISA KEV (exploited)', status: 'ok', detail: 'ok' }];
+    b.sources = [{ name: 'CISA KEV (exploited)', status: 'degraded', detail: 'unreachable' }];
+    const merged = aggregateSources([a, b]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].status).toBe('degraded'); // degraded outranks ok
+  });
+
+  it('renderComment surfaces the ledger for a scanned manifest', () => {
+    const r = report([finding('ok', 'safe')]);
+    r.sources = sources;
+    const withSources = mr({
+      report: r,
+      changes: new Map([['ok', 'added']] as const),
+      introduced: keysOf(finding('ok', 'safe')),
+    });
+    const body = renderComment([withSources]);
+    expect(body).toContain('📡 Data sources');
+    expect(body).toContain('OSV.dev (advisories)');
   });
 });
 

@@ -1,6 +1,7 @@
 import {
   meetsVulnLevel,
   runtimeLabel,
+  type DataSource,
   type Report,
   type Verdict,
   type Violation,
@@ -13,6 +14,35 @@ import {
  * control, and advisory text is free-form — defensive, cheap. */
 function cell(s: string): string {
   return s.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
+}
+
+const SOURCE_ICON: Record<DataSource['status'], string> = { ok: '✅', degraded: '⚠️', skipped: '➖' };
+
+/** A "📡 Data sources" table — what Preflight consulted this run and what each returned — so a
+ * scan is transparent about *what it checked*, not just what it found. Returns the lines to splice
+ * into a comment/issue body (empty when there's nothing to show). */
+export function renderSources(sources: DataSource[] | undefined): string[] {
+  if (!sources || sources.length === 0) return [];
+  const lines = ['#### 📡 Data sources', '', '| Source | Result |', '| --- | --- |'];
+  for (const s of sources) lines.push(`| ${SOURCE_ICON[s.status]} ${cell(s.name)} | ${cell(s.detail)} |`);
+  lines.push('');
+  return lines;
+}
+
+const STATUS_RANK: Record<DataSource['status'], number> = { skipped: 0, ok: 1, degraded: 2 };
+
+/** Merge per-manifest source ledgers into one run-level list (for the scheduled scan, which spans
+ * every manifest): one row per source name, showing the worst status any manifest saw so a
+ * degradation on any manifest stays visible. */
+export function aggregateSources(reports: Report[]): DataSource[] {
+  const byName = new Map<string, DataSource>();
+  for (const r of reports) {
+    for (const s of r.sources ?? []) {
+      const prev = byName.get(s.name);
+      if (!prev || STATUS_RANK[s.status] > STATUS_RANK[prev.status]) byName.set(s.name, s);
+    }
+  }
+  return [...byName.values()];
 }
 
 /** A "⛔ Policy violations" markdown section for the PR comment, or '' when there is
@@ -208,6 +238,8 @@ export function renderRepoIssue(
       '',
     );
   }
+  // Run-level ledger of what was consulted across every scanned manifest.
+  lines.push(...renderSources(aggregateSources(reports)));
   lines.push(`_Last scanned ${new Date().toISOString().slice(0, 10)}._`);
   return { body: lines.join('\n'), count };
 }
@@ -287,6 +319,9 @@ export function renderComment(results: ManifestReport[], skipped: SkippedManifes
     } else if (findings.length === 0) {
       lines.push('None of the introduced packages carry known CVEs. ✅', '');
     }
+
+    // What actually got checked — surfaced so a clean result isn't a black box.
+    lines.push(...renderSources(r.report.sources));
   }
 
   const preexisting = preexistingTransitiveCves(results);

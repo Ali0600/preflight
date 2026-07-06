@@ -131,6 +131,21 @@ function Dashboard({ report }: { report: Report }) {
         <i className="ti ti-bulb" aria-hidden />
         <div>{insight(report)}</div>
       </div>
+
+      {report.sources && report.sources.length > 0 && (
+        <div className="sources">
+          <div className="sources-title">📡 Data sources — what this scan checked</div>
+          {report.sources.map((s) => (
+            <div key={s.name} className={`source-row ${s.status}`}>
+              <span className={`source-status ${s.status}`} aria-hidden>
+                {s.status === 'ok' ? '●' : s.status === 'degraded' ? '▲' : '○'}
+              </span>
+              <span className="source-name">{s.name}</span>
+              <span className="source-detail">{s.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

@@ -126,6 +126,11 @@ describe('analyzeFiles — Report.degraded surfaces the outage end-to-end (#1)',
     expect(report.degraded).toContain('CISA KEV');
     // the CVE is still reported — degradation announces the gap, it doesn't hide findings
     expect(report.findings.find((f) => f.name === 'evil')?.verdict).toBe('cve');
+    // …and the source ledger shows KEV degraded (queried, unreachable) while EPSS stayed ok
+    const kev = report.sources?.find((s) => s.name.includes('KEV'));
+    expect(kev?.status).toBe('degraded');
+    expect(kev?.detail).toContain('exploited-status unknown');
+    expect(report.sources?.find((s) => s.name.includes('EPSS'))?.status).toBe('ok');
   });
 
   it('a fully successful scan has no degraded field', async () => {
