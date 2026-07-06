@@ -244,3 +244,22 @@ unbounded in the dimension that actually costs (fan-out), not the one that was c
 **Takeaway:** for a public endpoint that turns one input into N side effects, cap **N** (the
 amplification factor), not just the input size — and enforce the cap before the expensive work,
 scoped to the untrusted caller so trusted paths keep full range.
+
+## A gate should show its coverage, not just its verdict — a green result with no visible scope is a black box
+
+"I don't see any information when I use Preflight through the CI." A clean run reported findings
+(or none) but never *what it actually checked* — which sources ran, which were unreachable, which
+were off. A pass with no visible scope is indistinguishable from a check that quietly ran nothing.
+Fix: `Report.sources` — a per-run ledger (`ok` / `degraded` / `skipped` + a one-line result per
+source), derived in core from what was genuinely queried (the options + whether any CVEs were
+found) and the degraded set, so it never claims a source ran that didn't. Rendered on every surface
+(CLI, Action comment + scheduled issue, web panel, JSON). Skipped sources say *why* ("no CVEs to
+prioritize", "enable with --latest"), so the ledger is complete and self-documenting.
+
+**Why it came up:** the tool's whole value is trust, and a green check the user can't inspect earns
+none — the same instinct behind "a resilient fallback must announce itself", applied to the happy path.
+
+**Takeaway:** surface a gate's *coverage* alongside its verdict — list the inputs/sources consulted,
+their reachability, and what each contributed, even (especially) on a clean pass. Derive the ledger
+from what actually ran so it can't drift from reality, and show skipped items with a reason so "what
+else could this check?" is answered in-band.
