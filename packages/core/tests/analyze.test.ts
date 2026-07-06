@@ -55,6 +55,19 @@ describe('analyzeFiles', () => {
     expect(report.total).toBe(0); // resolved & analyzed, no traversal
   });
 
+  it('rejects a graph over maxDeps BEFORE any fetch — bounds public fan-out (#2 audit)', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const files = {
+      'package.json': JSON.stringify({ dependencies: { a: '1.0.0', b: '2.0.0', c: '3.0.0' } }),
+    };
+    await expect(analyzeFiles(files, { maxDeps: 2 })).rejects.toThrow(/Dependency graph too large/);
+    expect(fetchSpy).not.toHaveBeenCalled(); // capped before the outbound calls
+    // …and it scans fine under the cap
+    const ok = await analyzeFiles(files, { maxDeps: 10 });
+    expect(ok.total).toBe(3);
+  });
+
   it('flags a lockfile-less npm scan (direct deps only) so callers can warn (#23)', async () => {
     const report = await analyzeFiles({
       'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.3.0' } }),

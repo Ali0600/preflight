@@ -57,5 +57,6 @@ export {
   analyzeContent,
   analyzeFiles,
   analyzeManifest,
+  GraphTooLargeError,
   type AnalyzeOptions,
 } from './analyze';

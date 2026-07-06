@@ -25,6 +25,17 @@ import type {
 import { fetchVulns } from './osv';
 import { decideVerdict } from './verdict';
 
+/** Thrown when the enumerated graph exceeds `AnalyzeOptions.maxDeps`. The message is
+ * self-authored (safe to surface), so untrusted callers can map it to a 413 without leaking
+ * internals. Guards the outbound fan-out on the public web endpoints (one 8 MB lockfile could
+ * otherwise amplify into thousands of OSV/registry calls). */
+export class GraphTooLargeError extends Error {
+  constructor(readonly count: number, readonly max: number) {
+    super(`Dependency graph too large: ${count} deps (max ${max}). Scan locally with the CLI instead.`);
+    this.name = 'GraphTooLargeError';
+  }
+}
+
 export interface AnalyzeOptions {
   /** Fetch each dep's latest version + last-publish date (enables the `stale` verdict). */
   latest?: boolean;
@@ -33,6 +44,10 @@ export interface AnalyzeOptions {
   /** Target runtimes to check installability against (enables the `incompatible` verdict).
    * The manifest's ecosystem picks which one applies: npm -> node, PyPI -> python. */
   runtimes?: Partial<Record<RuntimeName, RuntimeTarget>>;
+  /** Cap the enumerated dependency graph — throws `GraphTooLargeError` above it, BEFORE any
+   * network fan-out. Left unset by trusted callers (CLI/Action/fleet scan real repos); set by
+   * the public web endpoints to bound abuse. */
+  maxDeps?: number;
 }
 
 /** Analyze a manifest file on disk (CLI / Action) — resolves npm lockfile versions. */
@@ -85,6 +100,13 @@ export async function analyzeFiles(
 /** Core pipeline on a parsed manifest: OSV vulns + lockstep (+ latest/health) -> verdict -> report. */
 export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions = {}): Promise<Report> {
   const { dependencies, ecosystem } = manifest;
+
+  // Bound the outbound fan-out before any network call: an untrusted caller (public /api/scan)
+  // could otherwise submit a lockfile enumerating tens of thousands of packages, each of which
+  // fans out to OSV/registry/deps.dev. Trusted callers leave `maxDeps` unset (unbounded).
+  if (opts.maxDeps !== undefined && dependencies.length > opts.maxDeps) {
+    throw new GraphTooLargeError(dependencies.length, opts.maxDeps);
+  }
 
   // OSV scans the whole graph; latest-version + health only apply to deps you control directly
   // (you don't bump a transitive dep yourself), so scope those lookups to the direct set.
