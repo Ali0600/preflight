@@ -208,3 +208,39 @@ The escape hatch is a small, evidence-based exception list — each entry a docu
 with a version boundary, never a heuristic — and it must pair with an auto-updater ignore, or
 the fix lasts exactly one dependabot cycle. Design such lists to self-expire (the boundary
 range stops matching when the fixed major ships).
+
+## "Scan didn't run" is not "scan ran degraded" — the first fails closed, the second warns
+
+Preflight has two failure shapes, and they must be handled oppositely. A *degraded* scan ran
+but lost a **secondary** enrichment source (KEV/EPSS unreachable) → warn, don't block (announce
+via `Report.degraded`, let the gate evaluate what it has). A *scan failure* means the **primary**
+OSV fetch threw (fail-closed by design) or the manifest was unparseable → there are **zero**
+results, so the gate must fail closed, not pass. The audit-2 bug (#42) was the Action treating
+the second like the first: it caught the thrown `analyze`, logged "Skipped", and — if that was
+the only changed manifest — returned a **green** check with a stale "✅ No new CVEs" comment,
+while the CLI exited non-zero on the exact same throw. Fix: collect skipped manifests, surface
+them, and `setFailed` (a pure `prGateFails()` carries the decision so it's testable without octokit).
+
+**Why it came up:** second security audit — the fail-closed OSV throw the *first* audit added was
+silently defeated at the Action boundary, so a transient OSV outage during a risky PR → green gate.
+
+**Takeaway:** enumerate a gate's failure modes and classify each as fail-open or fail-closed up
+front; "couldn't evaluate at all" is always fail-closed. Then prove **every surface** (CLI, CI
+Action, API) makes the same call on the same failure — a `catch` that downgrades an exception to a
+skipped item quietly converts fail-closed into fail-open.
+
+## Bound the fan-out, not just the payload, on an untrusted amplifying endpoint
+
+The public `/api/scan` capped the request body at 8 MB but not the **dependency count**, and one
+request amplifies: an 8 MB lockfile enumerates tens of thousands of packages, each fanning out to
+OSV/registry/deps.dev — thousands of outbound calls per request (self-DoS against the 60 s Vercel
+budget, and a way to get Preflight rate-limited by its own free upstreams). Fixed with
+`AnalyzeOptions.maxDeps`, thrown as `GraphTooLargeError` **before any network call**; the web
+routes cap at 5000 → HTTP 413, while trusted callers (CLI/Action/fleet) stay unbounded.
+
+**Why it came up:** audit-2 finding #2 — a keyless public endpoint whose work per request is
+unbounded in the dimension that actually costs (fan-out), not the one that was capped (bytes).
+
+**Takeaway:** for a public endpoint that turns one input into N side effects, cap **N** (the
+amplification factor), not just the input size — and enforce the cap before the expensive work,
+scoped to the untrusted caller so trusted paths keep full range.

@@ -41,13 +41,17 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
   - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy`/`--fail-level` + Action `fail-level`/`policy-file`; `preflight.config.json`). Levels: `cve|kev|epss:x|severity:x` (unrated=low, KEV beats any floor). `allow: { installScripts, advisories }` exempts adjudicated packages/advisories — every suppression is returned + announced; malware fails unconditionally (even with no `vuln` rule) and is never exemptible
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
-  - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`)
+  - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`). `AnalyzeOptions.maxDeps` throws `GraphTooLargeError` **before any fetch** when the enumerated graph exceeds it — the web routes set it (→ 413) to bound public fan-out; CLI/Action/fleet leave it unset (trusted, unbounded)
 - `packages/cli` (`@preflight/cli`) — commander CLI (`preflight check`)
 - `packages/action` (`@preflight/action`) — JS Action (node24). `mode: pr` (default) diffs the
   **whole tree** base↔head (manifest + lockfile via raw `getContent`; lockfile-only PRs trigger
   too) → `fail-level` + policy evaluate the `introduced` set (direct AND transitive `name@version`s
   new to the tree — dogfood BUG-3/#20: gating only direct diffed deps let a lockfile CVE through
-  while the comment said "No new CVEs"). Pre-existing findings stay informational. `mode: repo`
+  while the comment said "No new CVEs"). Pre-existing findings stay informational. A manifest that
+  **fails to scan** (the primary OSV fetch throws — fail-closed by design — or the manifest is
+  unparseable) is collected as `skipped`, surfaced in the comment/issue, and **fails the check**
+  (`report.ts`'s pure `prGateFails()`) — matching the CLI's non-zero exit; do NOT downgrade it to a
+  silent pass. This is distinct from a *degraded* scan (a lost secondary source → warn-only). `mode: repo`
   (scheduled) scans every committed manifest → tracking issue. Writes `preflight.sarif` (uploaded
   to the Security tab). `report.ts` pure/testable; `index.ts` octokit glue. **Committed**
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
