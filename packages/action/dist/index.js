@@ -25426,8 +25426,86 @@ async function analyzeManifest(manifest, opts = {}) {
     summary,
     runtimeTarget,
     lockfile: manifest.lockfile,
-    degraded: degraded.size ? [...degraded] : void 0
+    degraded: degraded.size ? [...degraded] : void 0,
+    sources: describeSources({
+      ecosystem,
+      dependencies,
+      findings,
+      degraded,
+      opts,
+      runtimeTarget,
+      directCount: directNames.length
+    })
   };
+}
+function describeSources(args) {
+  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, directCount } = args;
+  const down = (s) => degraded.has(s);
+  const registry = ecosystem === "npm" ? "npm registry" : "PyPI";
+  const sources = [];
+  const scanned = dependencies.filter((d) => d.version).length;
+  const allVulns = findings.flatMap((f) => f.vulns);
+  const affected = findings.filter((f) => f.vulns.length > 0).length;
+  sources.push({
+    name: "OSV.dev (advisories)",
+    status: down("OSV advisory details") ? "degraded" : "ok",
+    detail: down("OSV advisory details") ? `scanned ${scanned} package version(s) \u2014 some advisory details were unreachable this run` : `scanned ${scanned} package version(s) \u2192 ${allVulns.length} advisor${allVulns.length === 1 ? "y" : "ies"}${affected ? ` in ${affected} package(s)` : ""}`
+  });
+  const cveIds = new Set(allVulns.map((v) => v.cve).filter((c) => Boolean(c)));
+  if (cveIds.size > 0) {
+    const kevCount = new Set(allVulns.filter((v) => v.kev && v.cve).map((v) => v.cve)).size;
+    const epssScored = new Set(allVulns.filter((v) => v.epss !== void 0 && v.cve).map((v) => v.cve)).size;
+    const maxEpss = Math.max(0, ...allVulns.map((v) => v.epss ?? 0));
+    sources.push({
+      name: "CISA KEV (exploited)",
+      status: down("CISA KEV") ? "degraded" : "ok",
+      detail: down("CISA KEV") ? "unreachable \u2014 exploited-status unknown this run" : `${kevCount} of ${cveIds.size} CVE(s) confirmed actively exploited`
+    });
+    sources.push({
+      name: "FIRST EPSS (exploit probability)",
+      status: down("FIRST EPSS") ? "degraded" : "ok",
+      detail: down("FIRST EPSS") ? "unreachable \u2014 exploit-probability unknown this run" : `${epssScored} CVE(s) scored${maxEpss > 0 ? ` (max ${maxEpss.toFixed(2)})` : ""}`
+    });
+  } else {
+    sources.push({
+      name: "CISA KEV \xB7 FIRST EPSS (exploit prioritization)",
+      status: "skipped",
+      detail: "not needed \u2014 no CVEs to prioritize"
+    });
+  }
+  sources.push(
+    opts.latest ? {
+      name: `${registry} (freshness + license)`,
+      status: down(registry) ? "degraded" : "ok",
+      detail: down(registry) ? "unreachable \u2014 latest versions/licenses may be missing" : `latest version + license for ${directCount} direct dep(s)`
+    } : {
+      name: `${registry} (freshness + license)`,
+      status: "skipped",
+      detail: "not run \u2014 enable with --latest / a license policy"
+    }
+  );
+  sources.push(
+    opts.health ? {
+      name: "deps.dev (OpenSSF Scorecard)",
+      status: down("deps.dev") ? "degraded" : "ok",
+      detail: down("deps.dev") ? "unreachable \u2014 health scores may be missing" : `health score for ${findings.filter((f) => f.health !== void 0).length} dep(s)`
+    } : {
+      name: "deps.dev (OpenSSF Scorecard)",
+      status: "skipped",
+      detail: "not run \u2014 enable with --health / a min-health policy"
+    }
+  );
+  if (runtimeTarget) {
+    const incompat = findings.filter(
+      (f) => f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible
+    ).length;
+    sources.push({
+      name: `${registry} (runtime compatibility)`,
+      status: down(registry) ? "degraded" : "ok",
+      detail: down(registry) ? `unreachable \u2014 compatibility with ${runtimeLabel(runtimeTarget)} unverified` : `checked ${directCount} direct dep(s) against ${runtimeLabel(runtimeTarget)}${incompat ? ` \u2192 ${incompat} incompatible` : ""}`
+    });
+  }
+  return sources;
 }
 async function enrichExploitability(vulnMap, onDegraded) {
   const vulns = [...new Set([...vulnMap.values()].flat())];
@@ -25462,6 +25540,25 @@ function typosquatHit(name, ecosystem) {
 // src/report.ts
 function cell(s) {
   return s.replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
+}
+var SOURCE_ICON = { ok: "\u2705", degraded: "\u26A0\uFE0F", skipped: "\u2796" };
+function renderSources(sources) {
+  if (!sources || sources.length === 0) return [];
+  const lines = ["#### \u{1F4E1} Data sources", "", "| Source | Result |", "| --- | --- |"];
+  for (const s of sources) lines.push(`| ${SOURCE_ICON[s.status]} ${cell(s.name)} | ${cell(s.detail)} |`);
+  lines.push("");
+  return lines;
+}
+var STATUS_RANK = { skipped: 0, ok: 1, degraded: 2 };
+function aggregateSources(reports) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const r of reports) {
+    for (const s of r.sources ?? []) {
+      const prev = byName.get(s.name);
+      if (!prev || STATUS_RANK[s.status] > STATUS_RANK[prev.status]) byName.set(s.name, s);
+    }
+  }
+  return [...byName.values()];
 }
 function renderPolicySection(violations, suppressed = []) {
   if (violations.length === 0 && suppressed.length === 0) return "";
@@ -25582,6 +25679,7 @@ function renderRepoIssue(reports, skipped = []) {
       ""
     );
   }
+  lines.push(...renderSources(aggregateSources(reports)));
   lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
   return { body: lines.join("\n"), count };
 }
@@ -25640,6 +25738,7 @@ function renderComment(results, skipped = []) {
     } else if (findings.length === 0) {
       lines.push("None of the introduced packages carry known CVEs. \u2705", "");
     }
+    lines.push(...renderSources(r.report.sources));
   }
   const preexisting = preexistingTransitiveCves(results);
   if (preexisting.length > 0) {

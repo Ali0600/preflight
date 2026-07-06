@@ -12,6 +12,7 @@ import { computeRuntimeCompat } from './runtime-compat';
 import { fetchRuntimeMetaAll } from './runtimes';
 import { typosquatOf } from './typosquat';
 import type {
+  DataSource,
   Dependency,
   Ecosystem,
   Finding,
@@ -23,7 +24,7 @@ import type {
   Vuln,
 } from './types';
 import { fetchVulns } from './osv';
-import { decideVerdict } from './verdict';
+import { decideVerdict, runtimeLabel } from './verdict';
 
 /** Thrown when the enumerated graph exceeds `AnalyzeOptions.maxDeps`. The message is
  * self-authored (safe to surface), so untrusted callers can map it to a 413 without leaking
@@ -185,7 +186,129 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     runtimeTarget,
     lockfile: manifest.lockfile,
     degraded: degraded.size ? [...degraded] : undefined,
+    sources: describeSources({
+      ecosystem,
+      dependencies,
+      findings,
+      degraded,
+      opts,
+      runtimeTarget,
+      directCount: directNames.length,
+    }),
   };
+}
+
+/** Build the per-source transparency ledger: which data sources ran, their reachability, and a
+ * one-line result. Derived from what was actually queried (opts + which CVEs were found) and the
+ * `degraded` set, so it never claims a source ran that didn't. Keeps every surface honest about
+ * coverage — a clean scan should still show *what it checked*, not just "no findings". */
+function describeSources(args: {
+  ecosystem: Ecosystem;
+  dependencies: Dependency[];
+  findings: Finding[];
+  degraded: Set<string>;
+  opts: AnalyzeOptions;
+  runtimeTarget?: RuntimeTarget;
+  directCount: number;
+}): DataSource[] {
+  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, directCount } = args;
+  const down = (s: string): boolean => degraded.has(s);
+  const registry = ecosystem === 'npm' ? 'npm registry' : 'PyPI';
+  const sources: DataSource[] = [];
+
+  // OSV — always consulted (a failed OSV querybatch throws before this runs, so reaching here
+  // means the presence scan succeeded; only per-advisory detail fetches can degrade).
+  const scanned = dependencies.filter((d) => d.version).length;
+  const allVulns = findings.flatMap((f) => f.vulns);
+  const affected = findings.filter((f) => f.vulns.length > 0).length;
+  sources.push({
+    name: 'OSV.dev (advisories)',
+    status: down('OSV advisory details') ? 'degraded' : 'ok',
+    detail: down('OSV advisory details')
+      ? `scanned ${scanned} package version(s) — some advisory details were unreachable this run`
+      : `scanned ${scanned} package version(s) → ${allVulns.length} advisor${allVulns.length === 1 ? 'y' : 'ies'}${affected ? ` in ${affected} package(s)` : ''}`,
+  });
+
+  // KEV + EPSS — consulted only when at least one advisory carries a CVE id (enrichExploitability's gate).
+  const cveIds = new Set(allVulns.map((v) => v.cve).filter((c): c is string => Boolean(c)));
+  if (cveIds.size > 0) {
+    // Count distinct CVEs (not advisory records — several advisories can share one CVE), so the
+    // KEV and EPSS lines speak in the same units ("N of M CVEs").
+    const kevCount = new Set(allVulns.filter((v) => v.kev && v.cve).map((v) => v.cve)).size;
+    const epssScored = new Set(allVulns.filter((v) => v.epss !== undefined && v.cve).map((v) => v.cve)).size;
+    const maxEpss = Math.max(0, ...allVulns.map((v) => v.epss ?? 0));
+    sources.push({
+      name: 'CISA KEV (exploited)',
+      status: down('CISA KEV') ? 'degraded' : 'ok',
+      detail: down('CISA KEV')
+        ? 'unreachable — exploited-status unknown this run'
+        : `${kevCount} of ${cveIds.size} CVE(s) confirmed actively exploited`,
+    });
+    sources.push({
+      name: 'FIRST EPSS (exploit probability)',
+      status: down('FIRST EPSS') ? 'degraded' : 'ok',
+      detail: down('FIRST EPSS')
+        ? 'unreachable — exploit-probability unknown this run'
+        : `${epssScored} CVE(s) scored${maxEpss > 0 ? ` (max ${maxEpss.toFixed(2)})` : ''}`,
+    });
+  } else {
+    sources.push({
+      name: 'CISA KEV · FIRST EPSS (exploit prioritization)',
+      status: 'skipped',
+      detail: 'not needed — no CVEs to prioritize',
+    });
+  }
+
+  // Registry freshness + license — only under --latest (or a license policy).
+  sources.push(
+    opts.latest
+      ? {
+          name: `${registry} (freshness + license)`,
+          status: down(registry) ? 'degraded' : 'ok',
+          detail: down(registry)
+            ? 'unreachable — latest versions/licenses may be missing'
+            : `latest version + license for ${directCount} direct dep(s)`,
+        }
+      : {
+          name: `${registry} (freshness + license)`,
+          status: 'skipped',
+          detail: 'not run — enable with --latest / a license policy',
+        },
+  );
+
+  // OpenSSF Scorecard — only under --health.
+  sources.push(
+    opts.health
+      ? {
+          name: 'deps.dev (OpenSSF Scorecard)',
+          status: down('deps.dev') ? 'degraded' : 'ok',
+          detail: down('deps.dev')
+            ? 'unreachable — health scores may be missing'
+            : `health score for ${findings.filter((f) => f.health !== undefined).length} dep(s)`,
+        }
+      : {
+          name: 'deps.dev (OpenSSF Scorecard)',
+          status: 'skipped',
+          detail: 'not run — enable with --health / a min-health policy',
+        },
+  );
+
+  // Runtime install-compatibility — only when a target runtime is set (uses registry engines /
+  // Requires-Python, so it shares the registry's degraded label).
+  if (runtimeTarget) {
+    const incompat = findings.filter(
+      (f) => f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible,
+    ).length;
+    sources.push({
+      name: `${registry} (runtime compatibility)`,
+      status: down(registry) ? 'degraded' : 'ok',
+      detail: down(registry)
+        ? `unreachable — compatibility with ${runtimeLabel(runtimeTarget)} unverified`
+        : `checked ${directCount} direct dep(s) against ${runtimeLabel(runtimeTarget)}${incompat ? ` → ${incompat} incompatible` : ''}`,
+    });
+  }
+
+  return sources;
 }
 
 /** Attach EPSS (exploit probability) + CISA KEV (confirmed-exploited) to each found advisory.

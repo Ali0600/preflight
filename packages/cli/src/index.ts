@@ -13,6 +13,7 @@ import {
   runtimeLabel,
   setCacheEnabled,
   toCycloneDX,
+  type DataSource,
   type Finding,
   type Report,
   type RuntimeName,
@@ -91,6 +92,20 @@ function printFinding(f: Finding): void {
   }
 }
 
+/** The transparency ledger: which data sources ran this scan and what each returned. Printed so a
+ * clean result still shows *what was checked*, not just "nothing found". */
+function printSources(sources: Report['sources']): void {
+  if (!sources || sources.length === 0) return;
+  const icon = (s: DataSource['status']): string =>
+    s === 'ok' ? pc.green('✓') : s === 'degraded' ? pc.yellow('⚠') : pc.dim('·');
+  console.log(pc.bold('Data sources'));
+  for (const s of sources) {
+    const line = `  ${icon(s.status)} ${s.name} — ${s.detail}`;
+    console.log(s.status === 'skipped' ? pc.dim(line) : line);
+  }
+  console.log();
+}
+
 function printReport(r: Report): void {
   const direct = r.findings.filter((f) => f.direct !== false);
   const transitive = r.findings.filter((f) => f.direct === false);
@@ -151,6 +166,7 @@ function printReport(r: Report): void {
     for (const f of [...transitiveVulns].sort(byVerdict)) printFinding(f);
   }
   console.log();
+  printSources(r.sources);
 }
 
 function printPolicy(file: string, violations: Violation[], suppressed: Violation[]): void {
