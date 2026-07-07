@@ -1,6 +1,8 @@
 import {
   meetsVulnLevel,
   runtimeLabel,
+  VERDICT_LABEL,
+  VERDICT_ORDER,
   type DataSource,
   type Report,
   type Verdict,
@@ -42,7 +44,12 @@ export function aggregateSources(reports: Report[]): DataSource[] {
       if (!prev || STATUS_RANK[s.status] > STATUS_RANK[prev.status]) byName.set(s.name, s);
     }
   }
-  return [...byName.values()];
+  const merged = [...byName.values()];
+  // CVE-free manifests emit a combined "KEV · EPSS — skipped" row while manifests WITH CVEs emit
+  // the individual queried rows. Across manifests both can appear; the individual rows already
+  // answer the question, so drop the combined placeholder when they're present.
+  const hasIndividual = merged.some((s) => s.name.startsWith('CISA KEV (') || s.name.startsWith('FIRST EPSS ('));
+  return hasIndividual ? merged.filter((s) => !s.name.includes('·')) : merged;
 }
 
 /** A "⛔ Policy violations" markdown section for the PR comment, or '' when there is
@@ -86,22 +93,10 @@ const EMOJI: Record<Verdict, string> = {
   stale: '🟪',
   safe: '🟩',
 };
-const LABEL: Record<Verdict, string> = {
-  malware: 'MALWARE',
-  cve: 'CVE',
-  incompatible: 'INCOMPAT',
-  pinned: 'PINNED',
-  stale: 'STALE',
-  safe: 'SAFE',
-};
-const ORDER: Record<Verdict, number> = {
-  malware: 0,
-  cve: 1,
-  incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5,
-};
+// Labels + worst-first ordering come from core (VERDICT_LABEL / VERDICT_ORDER) so every surface
+// agrees; only the emoji column above is Action-specific.
+const LABEL = VERDICT_LABEL;
+const ORDER = VERDICT_ORDER;
 
 export interface ManifestReport {
   path: string;

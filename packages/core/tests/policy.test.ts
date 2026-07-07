@@ -212,7 +212,11 @@ describe('loadPolicy', () => {
     expect(loadPolicy(path).failOn?.suspiciousName).toBe(true);
   });
 
-  it('returns an empty policy for a missing file', () => {
+  it('returns an empty policy for a missing file (implicit probe)', () => {
     expect(loadPolicy('/no/such/preflight.config.json')).toEqual({});
+  });
+
+  it('throws for a missing file when explicitly requested — a typo must not neutralize the gate', () => {
+    expect(() => loadPolicy('/no/such/preflight.config.json', true)).toThrow(/Policy file not found/);
   });
 });

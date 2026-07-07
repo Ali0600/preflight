@@ -1,3 +1,6 @@
+// VERDICT_ORDER comes from the `/types` subpath — a zero-import module — so this stays
+// client-bundle-safe (the core barrel would drag node:fs/crypto in via the engine).
+import { VERDICT_ORDER } from '@preflight/core/types';
 import type { Finding, Report, Verdict } from '@preflight/core';
 
 // Client-safe helpers: types + pure functions only (no engine runtime, so nothing pulls
@@ -22,18 +25,9 @@ export const VERDICT_META: Record<Verdict, { label: string; icon: string }> = {
   safe: { label: 'Safe', icon: 'ti-circle-check' },
 };
 
-const ORDER: Record<Verdict, number> = {
-  malware: 0,
-  cve: 1,
-  incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5,
-};
-
-/** Problems first: cve, then pinned, stale, safe. */
+/** Problems first: malware, cve, then pinned, stale, safe — the shared worst-first order. */
 export function sortFindings(findings: Finding[]): Finding[] {
-  return [...findings].sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+  return [...findings].sort((a, b) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict]);
 }
 
 const SEV_RANK = { unknown: 0, low: 1, medium: 2, high: 3, critical: 4 } as const;
@@ -65,10 +59,15 @@ export function versionCell(f: Finding): string {
   return f.version ?? f.range;
 }
 
-/** A short, dynamic insight line for the callout. */
+/** A short, dynamic insight line for the callout. Malware leads — it's the one verdict that
+ * should never read calm (a malware-only report previously showed no risk line at all). */
 export function insight(report: Report): string {
   const { summary, total } = report;
   const parts: string[] = [];
+  if (summary.malware > 0)
+    parts.push(
+      `${summary.malware} known-malicious ${summary.malware === 1 ? 'package' : 'packages'} — remove immediately`,
+    );
   if (summary.cve > 0)
     parts.push(`${summary.cve} ${summary.cve === 1 ? 'CVE needs' : 'CVEs need'} attention before merging`);
   if (summary.incompatible > 0)

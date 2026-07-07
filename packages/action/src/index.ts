@@ -70,7 +70,9 @@ async function run(): Promise<void> {
   const failLevelInput = core.getInput('fail-level');
   const failLevel = failLevelInput || 'cve';
   const policyFile = core.getInput('policy-file');
-  const policy = policyFile ? loadPolicy(policyFile) : undefined;
+  // mustExist: an explicitly-configured policy file that's missing (e.g. a typo'd path) must
+  // fail the run, not silently become an empty policy that gates nothing. Throw → setFailed.
+  const policy = policyFile ? loadPolicy(policyFile, true) : undefined;
 
   // With a policy file the policy is authoritative and fail-level is ignored — say so, or a
   // vuln-less policy silently stops gating CVEs even though fail-level looks set (mirrors the CLI).

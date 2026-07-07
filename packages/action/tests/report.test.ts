@@ -374,6 +374,24 @@ describe('renderSources — data-source transparency ledger', () => {
     expect(merged[0].status).toBe('degraded'); // degraded outranks ok
   });
 
+  it('aggregateSources drops the combined KEV·EPSS "skipped" row when individual rows exist', () => {
+    const withCves = report([finding('bad', 'cve')]);
+    const clean = report([finding('ok', 'safe')]);
+    withCves.sources = [
+      { name: 'CISA KEV (exploited)', status: 'ok', detail: '0 of 3 CVE(s)' },
+      { name: 'FIRST EPSS (exploit probability)', status: 'ok', detail: '3 CVE(s) scored' },
+    ];
+    clean.sources = [
+      { name: 'CISA KEV · FIRST EPSS (exploit prioritization)', status: 'skipped', detail: 'not needed' },
+    ];
+    const merged = aggregateSources([withCves, clean]);
+    expect(merged.some((s) => s.name.includes('·'))).toBe(false); // combined row deduped
+    expect(merged.some((s) => s.name === 'CISA KEV (exploited)')).toBe(true);
+    // …but a run where EVERY manifest was clean keeps the combined row (it's the only signal)
+    const allClean = aggregateSources([clean]);
+    expect(allClean.some((s) => s.name.includes('·'))).toBe(true);
+  });
+
   it('renderComment surfaces the ledger for a scanned manifest', () => {
     const r = report([finding('ok', 'safe')]);
     r.sources = sources;

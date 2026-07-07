@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Preflight CLI: pre-flight a dependency manifest for CVEs, framework-lockstep, and auto-update safety.",
+  "license": "MIT",
+  "keywords": ["dependencies", "security", "vulnerabilities", "osv", "supply-chain", "lockstep", "cli"],
   "bin": {
     "preflight": "./dist/index.js"
   },

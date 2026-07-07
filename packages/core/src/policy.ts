@@ -171,8 +171,17 @@ export function policyNeeds(policy: Policy): { latest: boolean; health: boolean;
   };
 }
 
-/** Load a JSON policy file, or an empty policy when the file is absent. */
-export function loadPolicy(path: string): Policy {
-  if (!existsSync(path)) return {};
+/** Load a JSON policy file. When the caller *explicitly requested* this policy (CLI `--policy`,
+ * Action `policy-file`), pass `mustExist` — a missing file then throws instead of silently
+ * becoming an empty policy that gates nothing (a typo'd path would otherwise neutralize the
+ * whole gate while looking configured). The implicit `preflight.config.json` probe for the
+ * `runtimes` key keeps the lenient default. */
+export function loadPolicy(path: string, mustExist = false): Policy {
+  if (!existsSync(path)) {
+    if (mustExist) {
+      throw new Error(`Policy file not found: ${path} — the gate would silently not apply.`);
+    }
+    return {};
+  }
   return JSON.parse(readFileSync(path, 'utf8')) as Policy;
 }

@@ -15,7 +15,7 @@ Precedence:
 1. **cve** — ≥1 OSV advisory for the resolved version. Reason names the worst severity; if the dep
    is also framework-pinned, it appends "fix via <tool>".
 2. **pinned** — in the framework-lockstep registry. Reason: "update via <tool>".
-3. **stale** — *(TODO)* major(s) behind latest AND last-publish old (registry/deps.dev).
+3. **stale** — ≥1 major behind latest AND last publish >1 year old (needs `--latest`).
 4. **safe** — independent, current, no advisories.
 
 ## Framework-lockstep registry (`lockstep.ts`) — the core IP
