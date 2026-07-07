@@ -263,3 +263,33 @@ none — the same instinct behind "a resilient fallback must announce itself", a
 their reachability, and what each contributed, even (especially) on a clean pass. Derive the ledger
 from what actually ran so it can't drift from reality, and show skipped items with a reason so "what
 else could this check?" is answered in-band.
+
+## Sequential string replaces contaminate each other — tokenize instead
+
+The `ignore-paths` glob-to-regex converter chained `.replace()` calls (`**/` → `(?:.*/)?`, then
+`**` → `.*`, then `*` → `[^/]*`). The third pass re-matched the `*` characters *inside the
+substitutions the earlier passes had produced*, silently corrupting the pattern — `examples/**`
+stopped matching nested paths. The tests caught it; the fix is a single-pass tokenizer that
+walks the input once and never re-reads its own output. (Bonus trap from the same hour: a JSDoc
+comment containing a literal `**/` terminates the block comment early — the docs about globs
+broke on their own syntax. Line comments there.)
+
+**Why it came up:** fresh-eyes tier A — adding repo-scan path exclusions with a dependency-free
+glob matcher.
+
+**Takeaway:** any multi-rule text transform where one rule's output can match another rule's
+pattern must process the input in a single pass (tokenize), not as chained global replaces.
+If you must chain, prove no substitution introduces characters a later rule matches.
+
+## One vulnerable package, several entry paths — re-run the scanner after the fix
+
+Bumping `@actions/github` (undici 6) looked like it cleared the 9 undici advisories — `npm ls`
+showed 6.27 under that tree. Re-running Preflight's own scheduled scan said otherwise:
+`@actions/core@1` *also* pinned `http-client@2 → undici@5.29`, a second path I hadn't looked at.
+The fix wasn't complete until the scanner said so (`npm audit`: 0 vulnerabilities).
+
+**Why it came up:** fixing issue #44's findings; the re-dispatched scan caught the leftover.
+
+**Takeaway:** a vulnerable package is a *node in a graph*, not a line in one dependency chain —
+fixing the path you traced says nothing about the paths you didn't. The finish line for a
+dependency fix is the detector reporting zero, not the bump landing.
