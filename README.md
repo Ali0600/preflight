@@ -1,5 +1,9 @@
 # Preflight
 
+[![CI](https://github.com/Ali0600/preflight/actions/workflows/ci.yml/badge.svg)](https://github.com/Ali0600/preflight/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Keyless](https://img.shields.io/badge/data%20sources-keyless-brightgreen)](#keyless-to-run)
+
 > Pre-flight a dependency **before** you add or auto-update it — known CVEs, health, and whether
 > it's actually safe to bump given your framework.
 
@@ -9,6 +13,47 @@ Its edge is a **framework-lockstep registry** — it knows that Expo, Angular, N
 SvelteKit, Remix, and Astro each pin a coordinated set of packages, so it tells you to bump those
 via the framework's own tool (`npx expo install`, `npx nuxi upgrade`, …) instead of letting a
 per-package updater break your build.
+
+## Use it
+
+**Gate your pull requests (GitHub Action)** — the fastest way in. On every PR it diffs the whole
+dependency tree (lockfile included) and fails the check on anything the PR introduces that carries
+a known CVE:
+
+```yaml
+# .github/workflows/preflight.yml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Ali0600/preflight@v1
+        # optional:
+        # with:
+        #   fail-level: kev            # only fail on confirmed-exploited CVEs
+        #   policy-file: preflight.config.json
+```
+
+Add a weekly re-scan (catches CVEs disclosed *after* a dep was merged) with a second workflow using
+`mode: repo` on a cron — see [.github/workflows/preflight-schedule.yml](.github/workflows/preflight-schedule.yml).
+
+**Run the CLI locally** — not yet on npm (coming), so run it from a clone:
+
+```bash
+git clone https://github.com/Ali0600/preflight && cd preflight && npm install
+npm run check -- path/to/package.json        # or a requirements*.txt
+```
+
+**Or paste a manifest in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
+no install, no account.
+
+> **Python note:** pip has no standard lockfile, so a `requirements.txt` scan covers exactly the
+> versions listed in it. For transitive coverage, scan a fully-pinned file (`pip freeze` or
+> pip-tools' `requirements.txt` output). npm scans always include the full `package-lock.json` tree.
 
 ## Highlights
 - **Supply-chain pre-flight engine** — parses npm/pip manifests, batches queries to the OSV
@@ -176,6 +221,18 @@ evaluated by `@preflight/core`:
 Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
 need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.
 
+**Where the file lives:** the CLI resolves `preflight.config.json` relative to the directory you
+run it *from* (pass `--policy path/to/file.json` for anything else); the Action's `policy-file:`
+is relative to the repo root. In a monorepo, one root config passed explicitly is the simplest setup.
+
+## Compliance exports (SBOM + SARIF)
+
+- **CycloneDX SBOM** — `preflight check --sbom [file]` emits a CycloneDX 1.6 JSON inventory of the
+  full dependency graph (with each vulnerability, EPSS score, and KEV flag attached) for
+  Dependency-Track, OSV-Scanner, or any SBOM-consuming tool.
+- **SARIF** — the Action writes `preflight.sarif` on every run; the bundled workflows upload it to
+  GitHub **code scanning**, so findings appear in the repo's Security tab with severity coloring.
+
 ## Keyless to run
 
 Every data source Preflight queries is **free, keyless, and accountless** — nothing to sign up for,
@@ -226,4 +283,4 @@ re-runs instant. A *failed* fetch is never cached — if a source is unreachable
   script, typosquat, min-health floor, or a tunable CVE/KEV/EPSS threshold).
 
 ## License
-MIT (intended).
+[MIT](LICENSE).

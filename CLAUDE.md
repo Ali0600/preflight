@@ -57,8 +57,13 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
   changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
   and runs `git diff --exit-code -- packages/action/dist`, so a forgotten rebuild fails the build.
-  Workflows: `preflight.yml` (PR), `preflight-schedule.yml` (cron), `release.yml` (tag → `npm publish
+  Workflows: `preflight.yml` (PR, passes `policy-file: preflight.config.json`), `preflight-schedule.yml`
+  (cron, `ignore-paths` excludes examples/fixtures), `release.yml` (`cli-v*` tag → `npm publish
   @preflight/cli --provenance`); third-party `uses:` are SHA-pinned (Dependabot `github-actions` bumps them).
+  **Tag scheme:** plain `v*` (`v1`) = the ACTION's release pointer (consumers write
+  `uses: Ali0600/preflight@v1`, resolved by the ROOT `action.yml` → `packages/action/dist`; move the
+  `v1` tag to ship Action updates, keep root/packages action.yml inputs in sync); `cli-v*` = npm
+  publish trigger (deferred until the user opts in). Never plain-`v*`-tag for npm.
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` (`analyzeContent()`) → metric cards + findings, matching `docs/dashboard-mockup.html`.
   Also `POST /api/scan` (`analyzeFiles()`, keyless — caller posts manifest+lockfile, `maxDuration=60`
