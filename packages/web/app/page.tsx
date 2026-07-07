@@ -106,11 +106,12 @@ function Dashboard({ report }: { report: Report }) {
 
       <div className="cards">
         <Card label="Dependencies" value={String(report.total)} />
+        {/* Malware shares the danger card — a malware-only scan must never read calm. */}
         <Card
           label="Known CVEs"
           value={String(report.summary.cve)}
-          sub={severity}
-          tone={report.summary.cve > 0 ? 'danger' : undefined}
+          sub={report.summary.malware > 0 ? `+${report.summary.malware} MALWARE` : severity}
+          tone={report.summary.cve > 0 || report.summary.malware > 0 ? 'danger' : undefined}
         />
         <Card
           label="Auto-update safe"

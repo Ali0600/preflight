@@ -38,6 +38,6 @@ _Not yet: transitive-dep counts ("+N transitive") and per-line PR annotations �
 - [x] `--latest` always on (version transitions like `0.85.3 → 0.86.0`); an "Include OpenSSF health"
       toggle drives the health-grade card. Exact-pinned npm deps are CVE-checked without a lockfile.
 - [ ] Connect a repo via GitHub OAuth (deferred config, per spec) — the paste flow is the MVP.
-- [ ] Deploy on Vercel (root directory `packages/web`; builds via the workspace) — ready, not yet pushed.
+- [x] Deploy on Vercel — live at https://preflight-web.vercel.app (auto-deploys on push to `main`).
 
 Acceptance: paste an Expo `package.json` → the mockup view, live ✓ (verified locally; screenshot in PR).

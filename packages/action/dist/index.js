@@ -42955,6 +42955,24 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// ../core/src/types.ts
+var VERDICT_ORDER = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5
+};
+var VERDICT_LABEL = {
+  malware: "MALWARE",
+  cve: "CVE",
+  incompatible: "INCOMPAT",
+  pinned: "PINNED",
+  stale: "STALE",
+  safe: "SAFE"
+};
+
 // ../core/src/manifest.ts
 var import_node_fs = require("fs");
 var import_node_path = require("path");
@@ -43743,8 +43761,13 @@ function policyNeeds(policy) {
     runtime: r.runtime !== void 0
   };
 }
-function loadPolicy(path) {
-  if (!(0, import_node_fs3.existsSync)(path)) return {};
+function loadPolicy(path, mustExist = false) {
+  if (!(0, import_node_fs3.existsSync)(path)) {
+    if (mustExist) {
+      throw new Error(`Policy file not found: ${path} \u2014 the gate would silently not apply.`);
+    }
+    return {};
+  }
   return JSON.parse((0, import_node_fs3.readFileSync)(path, "utf8"));
 }
 
@@ -44300,6 +44323,9 @@ function detectRuntimes(dir) {
   return out;
 }
 
+// ../core/src/sbom.ts
+var import_node_module = require("module");
+
 // ../core/src/sarif.ts
 var LEVEL = {
   critical: "error",
@@ -44598,22 +44624,8 @@ var EMOJI = {
   stale: "\u{1F7EA}",
   safe: "\u{1F7E9}"
 };
-var LABEL = {
-  malware: "MALWARE",
-  cve: "CVE",
-  incompatible: "INCOMPAT",
-  pinned: "PINNED",
-  stale: "STALE",
-  safe: "SAFE"
-};
-var ORDER = {
-  malware: 0,
-  cve: 1,
-  incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5
-};
+var LABEL = VERDICT_LABEL;
+var ORDER = VERDICT_ORDER;
 function globToRegExp(glob) {
   let re = "";
   for (let i = 0; i < glob.length; ) {
@@ -44858,7 +44870,7 @@ async function run() {
   const failLevelInput = core.getInput("fail-level");
   const failLevel = failLevelInput || "cve";
   const policyFile = core.getInput("policy-file");
-  const policy = policyFile ? loadPolicy(policyFile) : void 0;
+  const policy = policyFile ? loadPolicy(policyFile, true) : void 0;
   if (policy && failLevelInput) {
     core.warning("Preflight: policy-file governs the gate \u2014 the fail-level input is ignored.");
   }

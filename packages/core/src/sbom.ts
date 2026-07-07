@@ -1,4 +1,17 @@
+import { createRequire } from 'node:module';
+
 import type { Ecosystem, Finding, Report, Severity } from './types';
+
+/** Tool version for the SBOM metadata, read from package.json so a release can't drift from the
+ * emitted documents. In the bundled CLI this resolves to the CLI's package.json (same depth) —
+ * also correct: that IS the tool that ran. Falls back rather than ever failing SBOM generation. */
+function toolVersion(): string {
+  try {
+    return (createRequire(import.meta.url)('../package.json') as { version: string }).version;
+  } catch {
+    return '0.0.0';
+  }
+}
 
 // CycloneDX 1.6 SBOM (https://cyclonedx.org/) — a standard, tool-agnostic inventory of every
 // component in the dependency graph plus the vulnerabilities affecting them. Consumable by
@@ -70,7 +83,7 @@ export function toCycloneDX(report: Report): object {
     version: 1,
     metadata: {
       timestamp: new Date().toISOString(),
-      tools: { components: [{ type: 'application', name: 'preflight', version: '0.1.0' }] },
+      tools: { components: [{ type: 'application', name: 'preflight', version: toolVersion() }] },
       component: { type: 'application', name: report.path },
     },
     components,

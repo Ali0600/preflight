@@ -12,7 +12,8 @@ Two supported ways. Both work locally and in Docker, neither needs public npm.
 
 Preflight's web app exposes a **keyless** `POST /api/scan` — you send the manifest (+ lockfile) you
 already have, it returns the full `Report` (incl. the transitive graph). Preflight never reaches for
-your repo, so there's no token on its side.
+your repo, so there's no token on its side. (You may also see `/api/analyze` in the app's network
+tab — that's the dashboard UI's own paste-form route; embedders should use `/api/scan`.)
 
 ```bash
 curl -X POST "$PREFLIGHT_URL/api/scan" -H 'content-type: application/json' \

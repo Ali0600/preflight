@@ -7,6 +7,28 @@ export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
 export type Verdict = 'malware' | 'cve' | 'incompatible' | 'pinned' | 'stale' | 'safe';
 
+/** Worst-first sort rank for verdicts — shared by every surface so tables/lists agree.
+ * Lives here (types.ts has zero imports) so the web CLIENT bundle can import it via the
+ * `@preflight/core/types` subpath without dragging node:fs/crypto from the engine barrel. */
+export const VERDICT_ORDER: Record<Verdict, number> = {
+  malware: 0,
+  cve: 1,
+  incompatible: 2,
+  pinned: 3,
+  stale: 4,
+  safe: 5,
+};
+
+/** Console-style badge label per verdict (CLI + Action). The web picks its own display text. */
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  malware: 'MALWARE',
+  cve: 'CVE',
+  incompatible: 'INCOMPAT',
+  pinned: 'PINNED',
+  stale: 'STALE',
+  safe: 'SAFE',
+};
+
 export interface Dependency {
   name: string;
   /** Version range as declared in the manifest, e.g. "^1.2.0" or ">=2,<3". */

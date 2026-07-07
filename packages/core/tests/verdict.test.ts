@@ -192,3 +192,57 @@ describe('decideVerdict — exploitability + malware', () => {
     expect(r.reason).toContain('EPSS 0.87');
   });
 });
+
+describe('decideVerdict — precedence holds under combined signals (malware > cve > incompatible > pinned > stale)', () => {
+  const base = { name: 'x', range: '^1', version: '1.0.0', dev: false, lockstep: { pinned: false as const } };
+  // Qualifies as stale on its own: 2 majors behind, last published years ago.
+  const staleBits = { latest: '3.0.0', lastPublish: '2020-01-01T00:00:00Z' };
+  const brokenRuntime = {
+    target: { runtime: 'node' as const, version: '18', source: '--node flag', explicit: true },
+    rangeUnsatisfiable: true,
+    resolvedIncompatible: false,
+    latestIncompatible: true,
+  };
+
+  it('stale + CVE → cve (a stale dep with an advisory must never read as merely old)', () => {
+    const r = decideVerdict({
+      ...base,
+      ...staleBits,
+      vulns: [{ id: 'GHSA-1', summary: 's', severity: 'medium' }],
+    });
+    expect(r.verdict).toBe('cve');
+  });
+
+  it('stale + malware → malware', () => {
+    const r = decideVerdict({
+      ...base,
+      ...staleBits,
+      vulns: [{ id: 'MAL-2', summary: 'm', severity: 'critical', malicious: true }],
+    });
+    expect(r.verdict).toBe('malware');
+  });
+
+  it('stale + incompatible → incompatible (broken beats old)', () => {
+    const r = decideVerdict({ ...base, ...staleBits, vulns: [], runtimeCompat: brokenRuntime });
+    expect(r.verdict).toBe('incompatible');
+  });
+
+  it('stale + pinned → pinned (the framework owns the upgrade path)', () => {
+    const r = decideVerdict({
+      ...base,
+      ...staleBits,
+      vulns: [],
+      lockstep: { pinned: true, framework: 'Expo', tool: 'npx expo install' },
+    });
+    expect(r.verdict).toBe('pinned');
+  });
+
+  it('incompatible + CVE → cve (the advisory still outranks installability)', () => {
+    const r = decideVerdict({
+      ...base,
+      vulns: [{ id: 'GHSA-2', summary: 's', severity: 'high' }],
+      runtimeCompat: brokenRuntime,
+    });
+    expect(r.verdict).toBe('cve');
+  });
+});

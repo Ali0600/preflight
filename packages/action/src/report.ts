@@ -1,6 +1,8 @@
 import {
   meetsVulnLevel,
   runtimeLabel,
+  VERDICT_LABEL,
+  VERDICT_ORDER,
   type DataSource,
   type Report,
   type Verdict,
@@ -86,22 +88,10 @@ const EMOJI: Record<Verdict, string> = {
   stale: '🟪',
   safe: '🟩',
 };
-const LABEL: Record<Verdict, string> = {
-  malware: 'MALWARE',
-  cve: 'CVE',
-  incompatible: 'INCOMPAT',
-  pinned: 'PINNED',
-  stale: 'STALE',
-  safe: 'SAFE',
-};
-const ORDER: Record<Verdict, number> = {
-  malware: 0,
-  cve: 1,
-  incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5,
-};
+// Labels + worst-first ordering come from core (VERDICT_LABEL / VERDICT_ORDER) so every surface
+// agrees; only the emoji column above is Action-specific.
+const LABEL = VERDICT_LABEL;
+const ORDER = VERDICT_ORDER;
 
 export interface ManifestReport {
   path: string;

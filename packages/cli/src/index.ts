@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 
 import {
@@ -13,6 +14,8 @@ import {
   runtimeLabel,
   setCacheEnabled,
   toCycloneDX,
+  VERDICT_LABEL,
+  VERDICT_ORDER,
   type DataSource,
   type Finding,
   type Report,
@@ -34,24 +37,9 @@ const BADGE: Record<Verdict, (s: string) => string> = {
   stale: (s) => pc.bgMagenta(pc.white(` ${s} `)),
 };
 
-const LABEL: Record<Verdict, string> = {
-  malware: 'MALWARE',
-  cve: 'CVE',
-  incompatible: 'INCOMPAT',
-  pinned: 'PINNED',
-  safe: 'SAFE',
-  stale: 'STALE',
-};
-const ORDER: Record<Verdict, number> = {
-  malware: 0,
-  cve: 1,
-  incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5,
-};
-
-const byVerdict = (a: Finding, b: Finding) => ORDER[a.verdict] - ORDER[b.verdict];
+// Labels + worst-first ordering are shared from core (VERDICT_LABEL / VERDICT_ORDER) so every
+// surface agrees; only the colours above are CLI-specific.
+const byVerdict = (a: Finding, b: Finding) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict];
 
 function licenseTag(f: Finding): string {
   if (!f.license) return '';
@@ -63,7 +51,7 @@ function licenseTag(f: Finding): string {
 }
 
 function printFinding(f: Finding): void {
-  const badge = BADGE[f.verdict](LABEL[f.verdict].padEnd(8));
+  const badge = BADGE[f.verdict](VERDICT_LABEL[f.verdict].padEnd(8));
   const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
   console.log(
     `${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}${licenseTag(f)}`,
@@ -188,7 +176,9 @@ const program = new Command();
 program
   .name('preflight')
   .description('Pre-flight a dependency manifest: CVEs, framework-lockstep, auto-update safety.')
-  .version('0.1.0');
+  // Version comes from package.json so a publish can't drift from --version. The relative path
+  // works from both src/ (dev via tsx) and dist/ (published bundle) — same depth.
+  .version((createRequire(import.meta.url)('../package.json') as { version: string }).version);
 
 program
   .command('check')
@@ -205,7 +195,10 @@ program
     '--python <version>',
     'target Python runtime the manifest must install on ("3.9" = the whole 3.9.x series)',
   )
-  .option('--policy [file]', 'gate the run against a policy file (default ./preflight.config.json)')
+  .option(
+    '--policy [file]',
+    "gate the exit code on a policy file (default ./preflight.config.json; must exist when requested). Without this flag the config file is still consulted — but only for its 'runtimes' key, never the gate",
+  )
   .option(
     '--fail-level <level>',
     "exit-1 threshold, same grammar as the Action: 'cve' (any advisory — default), 'kev' (confirmed-exploited), 'epss:<0-1>', 'severity:<low|medium|high|critical>' (unrated counts as low; KEV always fails)",
@@ -247,7 +240,15 @@ program
           : typeof opts.policy === 'string'
             ? opts.policy
             : 'preflight.config.json';
-      const policy = policyFile ? loadPolicy(policyFile) : undefined;
+      // mustExist: the user explicitly asked for a gate — a missing file must not silently pass.
+      let policy: ReturnType<typeof loadPolicy> | undefined;
+      try {
+        policy = policyFile ? loadPolicy(policyFile, true) : undefined;
+      } catch (err) {
+        console.error(pc.red(`preflight: ${(err as Error).message}`));
+        process.exitCode = 1;
+        return;
+      }
       const need = policy ? policyNeeds(policy) : { latest: false, health: false, runtime: false };
       // Target runtimes, highest precedence first: flags > config `runtimes` (the default
       // config file counts even without --policy) > version files beside the manifest.
