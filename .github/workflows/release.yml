@@ -1,10 +1,12 @@
 name: Release
 
-# Publish the standalone CLI to npm on a version tag. Requires an NPM_TOKEN secret, and the
-# npm account must own the @preflight scope (or rename the package before tagging).
+# Publish the standalone CLI to npm on a cli-v* tag (e.g. cli-v0.1.0). Requires an NPM_TOKEN
+# secret, and the npm account must own the @preflight scope (or rename the package first).
+# Plain v* tags (v1, v1.0.0) are reserved for the GitHub ACTION's release pointer — they must
+# NOT trigger an npm publish, hence the distinct prefix.
 on:
   push:
-    tags: ['v*']
+    tags: ['cli-v*']
 
 permissions:
   contents: read

@@ -1,0 +1,46 @@
+# Root-level action definition so consumers can write `uses: Ali0600/preflight@v1`
+# (GitHub resolves an action referenced by bare repo to the action.yml at the repo root).
+# It runs the SAME committed bundle as the in-repo `./packages/action` — keep the inputs
+# here in sync with packages/action/action.yml (the source of truth for descriptions).
+name: 'Preflight'
+description: "Pre-flight a PR's dependency changes: CVEs (OSV), framework-lockstep status, and auto-update safety. Keyless — no tokens beyond github.token."
+author: 'Ali Hassan'
+branding:
+  icon: 'shield'
+  color: 'purple'
+inputs:
+  github-token:
+    description: 'Token used to read the PR diff and post the comment.'
+    required: false
+    default: ${{ github.token }}
+  fail-on-cve:
+    description: 'Master switch — set to "false" to never fail the check (comment only).'
+    required: false
+    default: 'true'
+  fail-level:
+    description: 'When to fail: "cve" (any new CVE), "kev" (confirmed-exploited only), "epss:<0-1>" (exploit probability ≥ x), or "severity:<low|medium|high|critical>" (worst rated severity at/above the floor; unrated counts as low, KEV fails any floor). Malicious packages always fail.'
+    required: false
+    default: 'cve'
+  mode:
+    description: '"pr" (default) diffs the PR and comments; "repo" scans every committed manifest and opens/updates a tracking issue (for scheduled runs).'
+    required: false
+    default: 'pr'
+  policy-file:
+    description: 'Path to a JSON policy file (e.g. preflight.config.json). When set, the gate fails on its rules — install-script, denied license, suspicious name, min-health, vuln level, runtime — instead of fail-level.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Target Node runtime the manifests must install on (e.g. "18" = the whole 18.x series). Empty = auto-detect from .nvmrc/.node-version at the repo root.'
+    required: false
+    default: ''
+  python-version:
+    description: 'Target Python runtime the manifests must install on (e.g. "3.9"). Empty = auto-detect from .python-version at the repo root.'
+    required: false
+    default: ''
+  ignore-paths:
+    description: 'mode: repo only — comma-separated globs of manifests to exclude from the scheduled scan (e.g. "examples/**,**/tests/fixtures/**" for intentionally-vulnerable demo files). Exclusions are listed in the tracking issue, never silent. Default: scan everything.'
+    required: false
+    default: ''
+runs:
+  using: 'node24'
+  main: 'packages/action/dist/index.js'
