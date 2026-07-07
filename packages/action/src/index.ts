@@ -24,6 +24,7 @@ import {
   diffDeclared,
   introducedFindings,
   introducedKeys,
+  matchesAnyGlob,
   newCveCount,
   prGateFails,
   renderComment,
@@ -198,8 +199,21 @@ async function runRepoScan(
   failOnCve: boolean,
   runtimes: AnalyzeOptions['runtimes'],
 ): Promise<void> {
-  const paths = findManifests('.');
+  // `ignore-paths`: comma-separated globs for manifests the scheduled scan should not report on
+  // (e.g. intentionally-vulnerable demo/fixture files that would drown real findings in noise).
+  // Default empty — never silently skip a user's manifest. Every exclusion is announced below.
+  const ignoreGlobs = core
+    .getInput('ignore-paths')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const all = findManifests('.');
+  const ignored = ignoreGlobs.length ? all.filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
+  const paths = all.filter((p) => !ignored.includes(p));
   core.info(`Scanning ${paths.length} manifest(s).`);
+  if (ignored.length > 0) {
+    core.info(`Ignoring ${ignored.length} manifest(s) via ignore-paths: ${ignored.join(', ')}`);
+  }
   const reports: Report[] = [];
   const skipped: SkippedManifest[] = [];
   for (const path of paths) {
@@ -215,7 +229,7 @@ async function runRepoScan(
   }
 
   writeSarif(reports);
-  const { body, count } = renderRepoIssue(reports, skipped);
+  const { body, count } = renderRepoIssue(reports, skipped, ignored);
   await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   core.setOutput('vuln-count', count);
   core.setOutput('scan-errors', skipped.length);

@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "-w", "@preflight/web", "--", "-p", "3737"],
       "port": 3737
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/ah/preflight-landing", "run", "dev", "--", "-p", "3939"],
+      "port": 3939
     }
   ]
 }

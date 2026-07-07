@@ -6,6 +6,7 @@ import {
   depKey,
   diffDeclared,
   introducedKeys,
+  matchesAnyGlob,
   newCveCount,
   prGateFails,
   renderComment,
@@ -277,6 +278,34 @@ describe('renderRepoIssue (scheduled scan)', () => {
     expect(body).toContain('backend/requirements.txt');
     expect(body).toContain('OSV querybatch failed: 503');
     expect(body).not.toContain('No known vulnerabilities in the scanned manifests. ✅'); // not a clean all-clear
+  });
+});
+
+describe('matchesAnyGlob (ignore-paths — exclude intentionally-vulnerable fixtures from repo scans)', () => {
+  const patterns = ['examples/**', '**/tests/fixtures/**'];
+
+  it('matches paths under an ignored directory at any depth', () => {
+    expect(matchesAnyGlob('examples/requirements.txt', patterns)).toBe(true);
+    expect(matchesAnyGlob('packages/core/tests/fixtures/npm/package.json', patterns)).toBe(true);
+    expect(matchesAnyGlob('tests/fixtures/requirements.txt', patterns)).toBe(true); // `**/` matches zero segments
+  });
+
+  it('does NOT match real manifests', () => {
+    expect(matchesAnyGlob('package.json', patterns)).toBe(false);
+    expect(matchesAnyGlob('packages/web/package.json', patterns)).toBe(false);
+    expect(matchesAnyGlob('examples-app/package.json', patterns)).toBe(false); // no prefix bleed
+  });
+
+  it('`*` stays within one path segment; `?` is one char', () => {
+    expect(matchesAnyGlob('backend/package.json', ['*/package.json'])).toBe(true);
+    expect(matchesAnyGlob('a/b/package.json', ['*/package.json'])).toBe(false);
+    expect(matchesAnyGlob('app1/package.json', ['app?/package.json'])).toBe(true);
+  });
+
+  it('renderRepoIssue announces ignored manifests instead of hiding them', () => {
+    const { body } = renderRepoIssue([report([finding('ok', 'safe')])], [], ['examples/requirements.txt']);
+    expect(body).toContain('excluded by `ignore-paths`');
+    expect(body).toContain('examples/requirements.txt');
   });
 });
 
