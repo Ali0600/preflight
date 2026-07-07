@@ -121,6 +121,42 @@ export interface SkippedManifest {
   error: string;
 }
 
+// Convert one glob pattern to an anchored RegExp. Supports `**` (any depth), `*` (within a
+// segment), `?` (one char). Deliberately dependency-free — the Action ships a committed bundle
+// and every dep lands in it. A double-star-slash also matches zero segments, so a pattern like
+// "**" + "/fixtures/..." catches a root-level fixtures/ too. Single-pass tokenizer on purpose:
+// chained .replace() calls would re-match the `*` inside earlier substitutions. (Line comments
+// too: a literal double-star-slash inside a block comment would terminate it early.)
+function globToRegExp(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; ) {
+    if (glob.startsWith('**/', i)) {
+      re += '(?:.*/)?'; // any number of leading segments, including none
+      i += 3;
+    } else if (glob.startsWith('**', i)) {
+      re += '.*'; // anything, across segments
+      i += 2;
+    } else if (glob[i] === '*') {
+      re += '[^/]*'; // anything within one segment
+      i += 1;
+    } else if (glob[i] === '?') {
+      re += '[^/]'; // a single character
+      i += 1;
+    } else {
+      re += glob[i].replace(/[.+^${}()|[\]\\]/, '\\$&'); // literal char, regex-escaped
+      i += 1;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/** Whether a repo-relative path matches any of the glob patterns (used by the repo-mode
+ * `ignore-paths` input to exclude e.g. intentionally-vulnerable fixtures from the scheduled
+ * scan). Exclusions are ANNOUNCED by the caller — a silent skip would hide coverage gaps. */
+export function matchesAnyGlob(path: string, patterns: string[]): boolean {
+  return patterns.some((p) => globToRegExp(p.trim()).test(path));
+}
+
 /** The identity a dependency has in a tree diff: its resolved version when known, else its range. */
 export function depKey(d: { name: string; version?: string; range: string }): string {
   return `${d.name}@${d.version ?? d.range}`;
@@ -196,10 +232,13 @@ function preexistingTransitiveCves(results: ManifestReport[]) {
 }
 
 /** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests.
- * `skipped` carries manifests that failed to scan — listed so an outage isn't invisible. */
+ * `skipped` carries manifests that failed to scan — listed so an outage isn't invisible.
+ * `ignored` carries manifests excluded by the `ignore-paths` input — announced, never silent
+ * (an unannounced exclusion is an invisible coverage gap). */
 export function renderRepoIssue(
   reports: Report[],
   skipped: SkippedManifest[] = [],
+  ignored: string[] = [],
 ): { body: string; count: number } {
   const risky = (r: Report) =>
     r.findings.filter((f) => f.verdict === 'malware' || f.verdict === 'cve');
@@ -230,6 +269,14 @@ export function renderRepoIssue(
     lines.push('### ⚠️ Could not scan', '', '| Manifest | Error |', '| --- | --- |');
     for (const s of skipped) lines.push(`| \`${cell(s.path)}\` | ${cell(s.error)} |`);
     lines.push('');
+  }
+  if (ignored.length > 0) {
+    lines.push(
+      `<sub>${ignored.length} manifest(s) excluded by \`ignore-paths\`: ${ignored
+        .map((p) => `\`${cell(p)}\``)
+        .join(', ')}</sub>`,
+      '',
+    );
   }
   const degraded = [...new Set(reports.flatMap((r) => r.degraded ?? []))];
   if (degraded.length > 0) {

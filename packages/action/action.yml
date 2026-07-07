@@ -33,6 +33,10 @@ inputs:
     description: 'Target Python runtime the manifests must install on (e.g. "3.9"). Empty = auto-detect from .python-version at the repo root.'
     required: false
     default: ''
+  ignore-paths:
+    description: 'mode: repo only — comma-separated globs of manifests to exclude from the scheduled scan (e.g. "examples/**,**/tests/fixtures/**" for intentionally-vulnerable demo files). Exclusions are listed in the tracking issue, never silent. Default: scan everything.'
+    required: false
+    default: ''
 runs:
   # node20 is deprecated on GitHub runners (they force Node 24 with a warning) — issue #24.
   using: 'node24'

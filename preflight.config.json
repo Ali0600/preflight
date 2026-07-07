@@ -1,6 +1,6 @@
 {
   "failOn": {
-    "vuln": "kev",
+    "vuln": "cve",
     "installScript": true,
     "suspiciousName": true
   },
