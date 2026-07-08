@@ -7,6 +7,14 @@
   "workspaces": [
     "packages/*"
   ],
+  "overrides": {
+    "tsup": {
+      "esbuild": "^0.28.1"
+    },
+    "next": {
+      "postcss": "^8.5.10"
+    }
+  },
   "scripts": {
     "check": "tsx packages/cli/src/index.ts check",
     "plan": "tsx packages/cli/src/index.ts plan",

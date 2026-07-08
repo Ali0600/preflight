@@ -103,6 +103,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   SvelteKit/Remix/Astro are seeded). Next to add: pip (Django) — and gem (Rails) once a Gemfile parser
   exists, else that data is dead. Be conservative: a false `pinned` is bad advice (we omit bare
   `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
+- **Root `overrides` are security patches for upstream pins** (`tsup→esbuild ^0.28.1`,
+  `next→postcss ^8.5.10` — advisories GHSA-g7r4-m6w7-qqqr / GHSA-qx2v-qp2m-jg93). REMOVE each
+  override once the upstream bumps past it, or it becomes invisible drift. npm quirk: after
+  editing `overrides`, stale locked copies survive `npm install` — a lockfile regen was needed.
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
 ## Experience Gained
