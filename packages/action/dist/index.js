@@ -25642,12 +25642,20 @@ function preexistingTransitiveCves(results) {
     )
   );
 }
-function renderRepoIssue(reports, skipped = [], ignored = []) {
-  const risky = (r) => r.findings.filter((f) => f.verdict === "malware" || f.verdict === "cve");
+function isAdjudicated(f, allow) {
+  if (f.verdict !== "cve" || f.vulns.length === 0 || allow.size === 0) return false;
+  return f.vulns.every((v) => allow.has(v.id) || v.cve !== void 0 && allow.has(v.cve));
+}
+function renderRepoIssue(reports, skipped = [], ignored = [], allowAdvisories = []) {
+  const allow = new Set(allowAdvisories);
+  const isVuln = (f) => f.verdict === "malware" || f.verdict === "cve";
   const lines = [ISSUE_MARKER, "## \u2708\uFE0F Preflight \u2014 scheduled dependency scan", ""];
   let count = 0;
+  const adjudicated = [];
   for (const r of reports) {
-    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    const vulns = r.findings.filter(isVuln);
+    for (const f of vulns) if (isAdjudicated(f, allow)) adjudicated.push({ path: r.path, f });
+    const findings = vulns.filter((f) => !isAdjudicated(f, allow)).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
     if (findings.length === 0) continue;
     count += findings.length;
     lines.push(`### \`${r.path}\` \u2014 ${findings.length}`, "");
@@ -25659,9 +25667,22 @@ function renderRepoIssue(reports, skipped = [], ignored = []) {
     lines.push("");
   }
   if (count === 0 && skipped.length === 0) {
-    lines.push("No known vulnerabilities in the scanned manifests. \u2705", "");
+    lines.push(
+      adjudicated.length > 0 ? `No unaccepted vulnerabilities \u2014 ${adjudicated.length} accepted by policy (below). \u2705` : "No known vulnerabilities in the scanned manifests. \u2705",
+      ""
+    );
   } else if (count === 0) {
     lines.push("No known vulnerabilities in the manifests that scanned \u2014 but some could not be scanned (below). \u26A0\uFE0F", "");
+  }
+  if (adjudicated.length > 0) {
+    lines.push(`### \u2705 Accepted by policy (\`allow.advisories\`) \u2014 ${adjudicated.length}`, "");
+    lines.push("| Package | Advisories | Note |", "| --- | --- | --- |");
+    for (const { path, f } of adjudicated) {
+      const ids = f.vulns.map((v) => v.cve ?? v.id).join(", ");
+      const tag = f.direct === false ? " _(transitive)_" : "";
+      lines.push(`| \`${cell(`${f.name}@${f.version ?? f.range}`)}\`${tag} <sub>${cell(path)}</sub> | ${cell(ids)} | ${cell(f.reason)} |`);
+    }
+    lines.push("");
   }
   if (skipped.length > 0) {
     lines.push("### \u26A0\uFE0F Could not scan", "", "| Manifest | Error |", "| --- | --- |");
@@ -25821,7 +25842,7 @@ async function run() {
     warning("Preflight: policy-file governs the gate \u2014 the fail-level input is ignored.");
   }
   if ((getInput("mode") || "pr") === "repo") {
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? []);
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -25897,7 +25918,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     setFailed(`Preflight: this PR ${why}.`);
   }
 }
-async function runRepoScan(octokit, owner, repo, failOnCve, runtimes) {
+async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvisories) {
   const ignoreGlobs = getInput("ignore-paths").split(",").map((p) => p.trim()).filter(Boolean);
   const all = findManifests(".");
   const ignored = ignoreGlobs.length ? all.filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
@@ -25918,7 +25939,7 @@ async function runRepoScan(octokit, owner, repo, failOnCve, runtimes) {
     }
   }
   writeSarif(reports);
-  const { body, count } = renderRepoIssue(reports, skipped, ignored);
+  const { body, count } = renderRepoIssue(reports, skipped, ignored, allowAdvisories);
   await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   setOutput("vuln-count", count);
   setOutput("scan-errors", skipped.length);
