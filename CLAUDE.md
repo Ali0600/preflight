@@ -39,6 +39,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     like lockstep; entries must be documented breakages (strict `satisfies === true` matching —
     never fire on "can't tell")
   - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `types.ts` — shared shapes **plus** `VERDICT_ORDER` + `VERDICT_LABEL` (worst-first rank + badge
+    label). types.ts has **zero imports**, so it's re-exported at the `@preflight/core/types` subpath
+    for the web **client** bundle (importing the barrel would drag `node:fs`/`crypto` in). CLI/Action/web
+    all import these — don't re-declare per-surface LABEL/ORDER (they used to, and drifted). `loadPolicy(path, mustExist)`: pass `mustExist` for an *explicitly-requested* policy (CLI `--policy`/Action `policy-file`) so a typo'd path throws instead of silently gating nothing
   - `policy.ts` — `evaluatePolicy(findings, policy)` + `meetsVulnLevel` (one gate shared by CLI `--policy`/`--fail-level` + Action `fail-level`/`policy-file`; `preflight.config.json`). Levels: `cve|kev|epss:x|severity:x` (unrated=low, KEV beats any floor). `allow: { installScripts, advisories }` exempts adjudicated packages/advisories — every suppression is returned + announced; malware fails unconditionally (even with no `vuln` rule) and is never exemptible
   - `sbom.ts` — `toCycloneDX(report)` (1.6); `sarif.ts` — `toSarif(reports[])` (2.1.0, for GitHub code scanning)
   - `analyze.ts` — orchestrator: `analyze(path)` / `analyzeContent(name,text)` / `analyzeFiles({name:text})` → `Report` (EPSS+KEV enrich when CVEs exist). `analyzeFiles` (temp-dir, keyless) powers the web `/api/scan` + embedding (see `docs/integration.md`). `AnalyzeOptions.maxDeps` throws `GraphTooLargeError` **before any fetch** when the enumerated graph exceeds it — the web routes set it (→ 413) to bound public fan-out; CLI/Action/fleet leave it unset (trusted, unbounded). Also builds `Report.sources` — the per-run **data-source ledger** (`ok`/`degraded`/`skipped` + one-line result per source), derived from what was actually queried so a clean scan still shows *what it checked*. Rendered on every surface (CLI `Data sources` block, Action `📡 Data sources` table + `aggregateSources` in the scheduled issue, web dashboard panel, `/api/*` JSON)
@@ -52,7 +56,12 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   unparseable) is collected as `skipped`, surfaced in the comment/issue, and **fails the check**
   (`report.ts`'s pure `prGateFails()`) — matching the CLI's non-zero exit; do NOT downgrade it to a
   silent pass. This is distinct from a *degraded* scan (a lost secondary source → warn-only). `mode: repo`
-  (scheduled) scans every committed manifest → tracking issue. Writes `preflight.sarif` (uploaded
+  (scheduled) scans every committed manifest → tracking issue; supports `ignore-paths` (comma-separated
+  globs — excludes intentionally-vulnerable demo/fixture manifests, exclusions announced in the issue,
+  via `report.ts`'s pure `matchesAnyGlob`/single-pass glob tokenizer) and honors policy
+  `allow.advisories` **only** (`isAdjudicated`: a fully-accepted cve finding → "✅ Accepted by policy"
+  section, listed but not counted; malware never adjudicable) + `runtimes` — NOT the `failOn` rules,
+  which are pr-mode "what a PR introduces" semantics. Writes `preflight.sarif` (uploaded
   to the Security tab). `report.ts` pure/testable; `index.ts` octokit glue. **Committed**
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
   changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
