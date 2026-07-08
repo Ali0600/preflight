@@ -81,7 +81,9 @@ async function run(): Promise<void> {
   }
 
   if ((core.getInput('mode') || 'pr') === 'repo') {
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy));
+    // Repo mode consults only the policy's `allow.advisories` (adjudicated advisories are listed
+    // but don't fail) and `runtimes` — NOT the `failOn` rules, which are PR-introduces-X semantics.
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? []);
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -200,6 +202,7 @@ async function runRepoScan(
   repo: string,
   failOnCve: boolean,
   runtimes: AnalyzeOptions['runtimes'],
+  allowAdvisories: string[],
 ): Promise<void> {
   // `ignore-paths`: comma-separated globs for manifests the scheduled scan should not report on
   // (e.g. intentionally-vulnerable demo/fixture files that would drown real findings in noise).
@@ -231,7 +234,7 @@ async function runRepoScan(
   }
 
   writeSarif(reports);
-  const { body, count } = renderRepoIssue(reports, skipped, ignored);
+  const { body, count } = renderRepoIssue(reports, skipped, ignored, allowAdvisories);
   await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   core.setOutput('vuln-count', count);
   core.setOutput('scan-errors', skipped.length);

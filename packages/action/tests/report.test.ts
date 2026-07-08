@@ -6,6 +6,7 @@ import {
   depKey,
   diffDeclared,
   introducedKeys,
+  isAdjudicated,
   matchesAnyGlob,
   newCveCount,
   prGateFails,
@@ -19,6 +20,11 @@ import {
   type ManifestReport,
   type SkippedManifest,
 } from '../src/report';
+
+/** A cve finding carrying specific advisory ids (for allow.advisories tests). */
+function cveWith(name: string, vulns: Finding['vulns']): Finding {
+  return { name, range: '^1', version: '1.0.0', dev: false, vulns, lockstep: { pinned: false }, verdict: 'cve', reason: 'cve reason' };
+}
 
 function finding(name: string, verdict: Verdict, range = '^1.0.0'): Finding {
   return {
@@ -278,6 +284,58 @@ describe('renderRepoIssue (scheduled scan)', () => {
     expect(body).toContain('backend/requirements.txt');
     expect(body).toContain('OSV querybatch failed: 503');
     expect(body).not.toContain('No known vulnerabilities in the scanned manifests. ✅'); // not a clean all-clear
+  });
+});
+
+describe('repo mode honors policy allow.advisories (adjudicated = listed, not failing)', () => {
+  const allow = new Set(['GHSA-accepted', 'CVE-2099-9999']);
+
+  describe('isAdjudicated', () => {
+    it('is true only when EVERY advisory is allow-listed (by id or CVE alias)', () => {
+      expect(isAdjudicated(cveWith('a', [{ id: 'GHSA-accepted', summary: 's', severity: 'low' }]), allow)).toBe(true);
+      expect(isAdjudicated(cveWith('a', [{ id: 'GHSA-x', summary: 's', severity: 'high', cve: 'CVE-2099-9999' }]), allow)).toBe(true);
+    });
+    it('is false if any advisory is still live', () => {
+      const mixed = cveWith('a', [
+        { id: 'GHSA-accepted', summary: 's', severity: 'low' },
+        { id: 'GHSA-live', summary: 's', severity: 'high' },
+      ]);
+      expect(isAdjudicated(mixed, allow)).toBe(false);
+    });
+    it('never adjudicates malware, even if its id is allow-listed', () => {
+      const mal = { ...cveWith('evil', [{ id: 'GHSA-accepted', summary: 'm', severity: 'critical', malicious: true }]), verdict: 'malware' as const };
+      expect(isAdjudicated(mal, new Set(['GHSA-accepted']))).toBe(false);
+    });
+    it('is false with an empty allow-list (the default — no behavior change)', () => {
+      expect(isAdjudicated(cveWith('a', [{ id: 'GHSA-accepted', summary: 's', severity: 'low' }]), new Set())).toBe(false);
+    });
+  });
+
+  it('demotes a fully-accepted finding to the Accepted section and drops it from the count', () => {
+    const r = report([cveWith('accepted-pkg', [{ id: 'GHSA-accepted', summary: 's', severity: 'low' }])]);
+    const { body, count } = renderRepoIssue([r], [], [], [...allow]);
+    expect(count).toBe(0); // does not fail the check
+    expect(body).toContain('Accepted by policy'); // …but is announced
+    expect(body).toContain('accepted-pkg');
+    expect(body).toContain('No unaccepted vulnerabilities — 1 accepted by policy'); // clean line reflects it
+  });
+
+  it('keeps a finding with any live advisory red and counted', () => {
+    const r = report([
+      cveWith('mixed', [
+        { id: 'GHSA-accepted', summary: 's', severity: 'low' },
+        { id: 'GHSA-live', summary: 's', severity: 'high' },
+      ]),
+    ]);
+    const { body, count } = renderRepoIssue([r], [], [], [...allow]);
+    expect(count).toBe(1);
+    expect(body).toContain('| 🟥 CVE |');
+    expect(body).not.toContain('Accepted by policy');
+  });
+
+  it('is a no-op without an allow-list — the finding still counts (default behavior preserved)', () => {
+    const r = report([cveWith('accepted-pkg', [{ id: 'GHSA-accepted', summary: 's', severity: 'low' }])]);
+    expect(renderRepoIssue([r]).count).toBe(1);
   });
 });
 

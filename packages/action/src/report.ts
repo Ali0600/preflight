@@ -4,6 +4,7 @@ import {
   VERDICT_LABEL,
   VERDICT_ORDER,
   type DataSource,
+  type Finding,
   type Report,
   type Verdict,
   type Violation,
@@ -226,22 +227,40 @@ function preexistingTransitiveCves(results: ManifestReport[]) {
   );
 }
 
+/** A `cve` finding is "adjudicated" when EVERY advisory it carries is in the policy's
+ * `allow.advisories` set (matched by GHSA/OSV id or CVE alias). Such a finding is still LISTED in
+ * the tracking issue — announce, don't hide — but does not count toward the check's failure.
+ * Malware is never adjudicable, matching `evaluatePolicy` (the allow-list can't suppress malware). */
+export function isAdjudicated(f: Finding, allow: ReadonlySet<string>): boolean {
+  if (f.verdict !== 'cve' || f.vulns.length === 0 || allow.size === 0) return false;
+  return f.vulns.every((v) => allow.has(v.id) || (v.cve !== undefined && allow.has(v.cve)));
+}
+
 /** Render the scheduled-scan tracking issue: every CVE/malware finding across the repo's manifests.
  * `skipped` carries manifests that failed to scan — listed so an outage isn't invisible.
  * `ignored` carries manifests excluded by the `ignore-paths` input — announced, never silent
- * (an unannounced exclusion is an invisible coverage gap). */
+ * (an unannounced exclusion is an invisible coverage gap). `allowAdvisories` (policy
+ * `allow.advisories`) demotes fully-adjudicated findings to a listed-but-not-failing section —
+ * so an accepted advisory stays visible without keeping the tracking issue permanently red. */
 export function renderRepoIssue(
   reports: Report[],
   skipped: SkippedManifest[] = [],
   ignored: string[] = [],
+  allowAdvisories: string[] = [],
 ): { body: string; count: number } {
-  const risky = (r: Report) =>
-    r.findings.filter((f) => f.verdict === 'malware' || f.verdict === 'cve');
+  const allow = new Set(allowAdvisories);
+  const isVuln = (f: Finding) => f.verdict === 'malware' || f.verdict === 'cve';
   const lines = [ISSUE_MARKER, '## ✈️ Preflight — scheduled dependency scan', ''];
   let count = 0;
+  const adjudicated: { path: string; f: Finding }[] = [];
 
   for (const r of reports) {
-    const findings = risky(r).sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
+    const vulns = r.findings.filter(isVuln);
+    for (const f of vulns) if (isAdjudicated(f, allow)) adjudicated.push({ path: r.path, f });
+    // Only findings with a still-live (non-accepted) advisory count and appear in the red table.
+    const findings = vulns
+      .filter((f) => !isAdjudicated(f, allow))
+      .sort((a, b) => ORDER[a.verdict] - ORDER[b.verdict]);
     if (findings.length === 0) continue;
     count += findings.length;
     lines.push(`### \`${r.path}\` — ${findings.length}`, '');
@@ -254,11 +273,29 @@ export function renderRepoIssue(
   }
 
   // Only an all-clean, fully-scanned run gets the green line — a run with un-scanned manifests
-  // must say so, not imply the repo is clear.
+  // must say so, not imply the repo is clear. Distinguish "genuinely nothing" from "nothing the
+  // policy hasn't already accepted".
   if (count === 0 && skipped.length === 0) {
-    lines.push('No known vulnerabilities in the scanned manifests. ✅', '');
+    lines.push(
+      adjudicated.length > 0
+        ? `No unaccepted vulnerabilities — ${adjudicated.length} accepted by policy (below). ✅`
+        : 'No known vulnerabilities in the scanned manifests. ✅',
+      '',
+    );
   } else if (count === 0) {
     lines.push('No known vulnerabilities in the manifests that scanned — but some could not be scanned (below). ⚠️', '');
+  }
+
+  // Adjudicated findings — listed so the acceptance is visible, but they never fail the check.
+  if (adjudicated.length > 0) {
+    lines.push(`### ✅ Accepted by policy (\`allow.advisories\`) — ${adjudicated.length}`, '');
+    lines.push('| Package | Advisories | Note |', '| --- | --- | --- |');
+    for (const { path, f } of adjudicated) {
+      const ids = f.vulns.map((v) => v.cve ?? v.id).join(', ');
+      const tag = f.direct === false ? ' _(transitive)_' : '';
+      lines.push(`| \`${cell(`${f.name}@${f.version ?? f.range}`)}\`${tag} <sub>${cell(path)}</sub> | ${cell(ids)} | ${cell(f.reason)} |`);
+    }
+    lines.push('');
   }
   if (skipped.length > 0) {
     lines.push('### ⚠️ Could not scan', '', '| Manifest | Error |', '| --- | --- |');
