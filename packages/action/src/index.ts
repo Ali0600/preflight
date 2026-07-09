@@ -164,7 +164,10 @@ async function runPrScan(
   // Evaluate the policy (if any) against everything this PR introduces — direct AND
   // transitive — so the check that protects main enforces what the CLI enforces locally.
   const policyResult = policy
-    ? evaluatePolicy(results.flatMap(introducedFindings), policy)
+    ? evaluatePolicy(results.flatMap(introducedFindings), policy, {
+        // The runtime target is repo-level, so any report's EOL status speaks for the tree.
+        runtimeEol: results.map((r) => r.report.runtimeEol).find(Boolean),
+      })
     : { violations: [], fail: false, suppressed: [] };
 
   await upsertComment(

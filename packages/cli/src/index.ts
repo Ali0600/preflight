@@ -122,6 +122,21 @@ function printReport(r: Report): void {
   );
   if (r.runtimeTarget) {
     console.log(pc.dim(`target runtime: ${runtimeLabel(r.runtimeTarget, true)}`));
+    // The interpreter itself can be the risk: an EOL runtime gets no security fixes, and no
+    // dependency-level verdict can say so. Loud when dead, a heads-up when <90 days out.
+    if (r.runtimeEol?.isEol) {
+      console.log(
+        pc.red(
+          `✖ ${runtimeLabel(r.runtimeTarget)} reached end-of-life${r.runtimeEol.eol ? ` on ${r.runtimeEol.eol}` : ''} — no security fixes (endoflife.date)`,
+        ),
+      );
+    } else if (r.runtimeEol?.daysUntilEol !== undefined && r.runtimeEol.daysUntilEol <= 90) {
+      console.log(
+        pc.yellow(
+          `⚠ ${runtimeLabel(r.runtimeTarget)} reaches end-of-life on ${r.runtimeEol.eol} (${r.runtimeEol.daysUntilEol} days) — plan the upgrade`,
+        ),
+      );
+    }
   }
   // A data source was unreachable this run — the results are best-effort, so say so loudly
   // rather than letting a green gate imply "all clear" (e.g. KEV down = exploited-status unknown).
@@ -306,7 +321,9 @@ program
         if (opts.failLevel) {
           console.error(pc.dim('note: --policy governs the gate — --fail-level is ignored'));
         }
-        const { violations, fail, suppressed } = evaluatePolicy(report.findings, policy);
+        const { violations, fail, suppressed } = evaluatePolicy(report.findings, policy, {
+          runtimeEol: report.runtimeEol,
+        });
         printPolicy(policyFile, violations, suppressed);
         if (fail) process.exitCode = 1;
       } else {

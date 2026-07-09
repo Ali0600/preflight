@@ -18,6 +18,7 @@ export {
 } from './policy';
 export { decideVerdict, runtimeLabel } from './verdict';
 export { fetchRuntimeMeta, fetchRuntimeMetaAll, type RuntimeMeta } from './runtimes';
+export { cycleOf, fetchRuntimeEol } from './eol';
 export { computeRuntimeCompat } from './runtime-compat';
 export { detectRuntimes } from './runtime-detect';
 export {

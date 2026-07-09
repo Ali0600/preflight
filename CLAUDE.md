@@ -27,6 +27,10 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
   - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
+  - `eol.ts` — endoflife.date runtime EOL (one fetch per product; `cycleOf` maps Node→major,
+    Python→major.minor, refuses bare "3"). Report-level (`Report.runtimeEol`), not a per-dep
+    verdict; policy `failOn.eolRuntime` gates it via `evaluatePolicy`'s `PolicyContext` third arg
+    (report-level facts). Runs whenever a runtime target is set; empty cycle list = failure (never cached)
   - `typosquat.ts` — offline lookalike heuristic (bundled top-packages list + Damerau-Levenshtein)
   - `license.ts` — `licenseRisk()` buckets a license id → permissive/copyleft/unknown
   - `cache.ts` — 24h disk cache (`~/.cache/preflight`, per-user XDG; `PREFLIGHT_CACHE_DIR` overrides) wrapping every API call (`setCacheEnabled`). **Only successful fetches are cached** — the clients throw on failure so a transient outage can't poison the cache and silently weaken detection; failures set `Report.degraded` instead

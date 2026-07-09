@@ -71,10 +71,12 @@ no install, no account.
   deprecated (npm's `deprecated` notice) or **yanked from PyPI** gets its own `deprecated` verdict,
   with the upstream message repeated verbatim — the "stop using this" signal `npm install` prints
   once and CI never sees. Opt-in gate via `failOn: { "deprecated": true }`.
-- **Runtime-compatibility check** — declare the runtime the project actually runs on
+- **Runtime-compatibility + EOL check** — declare the runtime the project actually runs on
   (`--python 3.9` / `--node 18`, a `runtimes` key in the config, or auto-detected from
   `.python-version`/`.nvmrc`) and Preflight flags dependencies whose range **cannot install
-  there** (`incompatible`), plus an early warning when the *newest* release dropped your runtime —
+  there** (`incompatible`), warns when the runtime itself is **past (or within 90 days of)
+  end-of-life** via endoflife.date — no dependency bump fixes a dead interpreter — plus an early
+  warning when the *newest* release dropped your runtime —
   i.e. the next auto-bump will break. Catches the class of failure CI on a newer interpreter
   can't: a floor like `uvicorn>=0.49` is green on Python 3.12 but uninstallable on the 3.9 dev
   machine (`Requires-Python >=3.10`). Data: PyPI `Requires-Python` (hard install failure) and
@@ -216,6 +218,8 @@ evaluated by `@preflight/core`:
   newest release dropped the runtime, so the next bump breaks). Without a policy, an explicit
   `--node`/`--python` target failing to install exits non-zero; auto-detected targets
   (`.nvmrc`/`.python-version`) only warn.
+- `eolRuntime` — fail when the target runtime itself is past end-of-life (endoflife.date). A
+  report-level rule: the violation names the interpreter, not a dependency.
 
 - `allow` — adjudicated exceptions that keep strict rules usable on real dependency trees:
   `installScripts` lists packages permitted to run install scripts (legitimate native binaries
@@ -252,8 +256,9 @@ CI, or the dashboard) with zero configuration.
 | **FIRST EPSS** | Exploit *probability* (0–1) per CVE — rank what's likely to actually be attacked | `api.first.org/data/v1/epss` |
 | **CISA KEV** | CVEs *confirmed* exploited in the wild — the "patch this now" list | `cisa.gov/.../known_exploited_vulnerabilities.json` |
 | **deps.dev** (v3) | OpenSSF Scorecard (project security health), behind `--health` | `api.deps.dev/v3` |
-| **npm registry** | Latest version + last-publish date → the `stale` verdict + version transitions | `registry.npmjs.org` |
-| **PyPI** (JSON) | Latest version + upload time, for pip manifests | `pypi.org/pypi/{name}/json` |
+| **npm registry** | Latest version + last-publish date + per-version deprecation → the `stale` / `deprecated` verdicts | `registry.npmjs.org` |
+| **PyPI** (JSON) | Latest version + upload time + yanked releases, for pip manifests | `pypi.org/pypi/{name}/json` |
+| **endoflife.date** | End-of-life date of the *target runtime* (Node/Python) — flags a dead interpreter no dependency bump can fix | `endoflife.date/api/{product}.json` |
 
 Every **successful** response is cached on disk for 24h (`~/.cache/preflight`; set
 `PREFLIGHT_CACHE_DIR` to override, or `--no-cache` to skip) to be a good API citizen and make

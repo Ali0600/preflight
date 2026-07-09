@@ -140,6 +140,21 @@ export interface Finding {
   reason: string;
 }
 
+/** End-of-life status of the target runtime (endoflife.date) — report-level, not per-dep:
+ * an EOL interpreter is a risk of the *project*, not of any one dependency. */
+export interface RuntimeEol {
+  runtime: RuntimeName;
+  /** The release cycle the target maps to, e.g. Node "18", Python "3.9". */
+  cycle: string;
+  /** ISO date the cycle hits (or hit) end-of-life; absent = no EOL published. */
+  eol?: string;
+  isEol: boolean;
+  /** Days until EOL (negative = past). Absent when no EOL date is published. */
+  daysUntilEol?: number;
+  /** Newest patch release in the cycle, for context. */
+  latest?: string;
+}
+
 /** One data source Preflight consults, and what it contributed this run — so a scan is
  * transparent about *what it checked*, not just what it found. `ok` = queried successfully;
  * `degraded` = queried but unreachable (results best-effort); `skipped` = not needed this run
@@ -160,6 +175,10 @@ export interface Report {
   summary: Record<Verdict, number>;
   /** The runtime the scan checked against (this manifest's ecosystem), when one applied. */
   runtimeTarget?: RuntimeTarget;
+  /** End-of-life status of that runtime (endoflife.date), when a target was set and its
+   * cycle resolved. `isEol` on a green scan is the "you're safe, but on a dead interpreter"
+   * heads-up no dependency-level check can give. */
+  runtimeEol?: RuntimeEol;
   /** npm only: whether a lockfile expanded the graph (`false` = direct deps only — warn!). */
   lockfile?: boolean;
   /** Data sources that failed to fetch this run (e.g. "CISA KEV", "FIRST EPSS"). When present,

@@ -34,6 +34,29 @@ export function renderSources(sources: DataSource[] | undefined): string[] {
 
 const STATUS_RANK: Record<DataSource['status'], number> = { skipped: 0, ok: 1, degraded: 2 };
 
+/** Markdown callout(s) for EOL / EOL-soon target runtimes across the scanned reports.
+ * Report-level (the interpreter, not a dep) and deduped — every manifest shares the repo's
+ * runtime target, so one line per runtime cycle is enough. */
+export function renderRuntimeEol(reports: Report[]): string[] {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const r of reports) {
+    const e = r.runtimeEol;
+    if (!e || seen.has(`${e.runtime}:${e.cycle}`)) continue;
+    seen.add(`${e.runtime}:${e.cycle}`);
+    const name = `${e.runtime === 'node' ? 'Node' : 'Python'} ${e.cycle}`;
+    if (e.isEol) {
+      lines.push(
+        `> 🪫 **${name} is end-of-life**${e.eol ? ` (since ${e.eol})` : ''} — the runtime gets no security fixes; no dependency bump fixes that.`,
+        '',
+      );
+    } else if (e.daysUntilEol !== undefined && e.daysUntilEol <= 90) {
+      lines.push(`> 🪫 **${name} reaches end-of-life on ${e.eol}** (${e.daysUntilEol} days) — plan the upgrade.`, '');
+    }
+  }
+  return lines;
+}
+
 /** Merge per-manifest source ledgers into one run-level list (for the scheduled scan, which spans
  * every manifest): one row per source name, showing the worst status any manifest saw so a
  * degradation on any manifest stays visible. */
@@ -318,6 +341,7 @@ export function renderRepoIssue(
       '',
     );
   }
+  lines.push(...renderRuntimeEol(reports));
   // Run-level ledger of what was consulted across every scanned manifest.
   lines.push(...renderSources(aggregateSources(reports)));
   lines.push(`_Last scanned ${new Date().toISOString().slice(0, 10)}._`);
@@ -453,5 +477,7 @@ export function renderComment(results: ManifestReport[], skipped: SkippedManifes
       `> ⚠️ **Degraded scan** — could not reach ${degraded.join(', ')} this run, so findings are best-effort (e.g. exploited-status may be incomplete). Re-run to retry.`,
     );
   }
+  const eolLines = renderRuntimeEol(results.map((r) => r.report));
+  if (eolLines.length > 0) lines.push('', ...eolLines);
   return lines.join('\n');
 }

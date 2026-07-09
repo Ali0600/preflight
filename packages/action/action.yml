@@ -22,7 +22,7 @@ inputs:
     required: false
     default: 'pr'
   policy-file:
-    description: 'Path to a JSON policy file (e.g. preflight.config.json). In pr mode the gate fails on its rules — install-script, deprecated, denied license, suspicious name, min-health, vuln level, runtime — instead of fail-level. In repo mode only `allow.advisories` (adjudicated advisory ids, listed but non-failing) and `runtimes` are consulted, not the failOn rules.'
+    description: 'Path to a JSON policy file (e.g. preflight.config.json). In pr mode the gate fails on its rules — install-script, deprecated, denied license, suspicious name, min-health, vuln level, runtime, eol-runtime — instead of fail-level. In repo mode only `allow.advisories` (adjudicated advisory ids, listed but non-failing) and `runtimes` are consulted, not the failOn rules.'
     required: false
     default: ''
   node-version:
