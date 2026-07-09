@@ -72,6 +72,11 @@ no install, no account.
   **weekly download counts** put numbers behind the hunch: `resembles "lodash" (155M dl/wk) —
   this package: 43 dl/wk — classic typosquat signature`), risky/unknown **licenses**, and weak
   **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
+- **GitHub Actions workflow scanning** — `.github/workflows/*.yml` files are manifests too: every
+  `uses:` is checked against OSV's *GitHub Actions* ecosystem (advisory ranges evaluated locally —
+  OSV doesn't do it server-side for actions), lookalike action names are flagged
+  (`action/checkout` vs `actions/checkout`), and any ref that isn't a **full commit SHA** gets a
+  mutable-ref warning — a moved tag swaps the code your CI runs (the tj-actions compromise vector).
 - **Deprecation surfacing** — under `--latest`, a dependency whose resolved version the maintainer
   deprecated (npm's `deprecated` notice) or **yanked from PyPI** gets its own `deprecated` verdict,
   with the upstream message repeated verbatim — the "stop using this" signal `npm install` prints
@@ -225,6 +230,8 @@ evaluated by `@preflight/core`:
   (`.nvmrc`/`.python-version`) only warn.
 - `eolRuntime` — fail when the target runtime itself is past end-of-life (endoflife.date). A
   report-level rule: the violation names the interpreter, not a dependency.
+- `unpinnedAction` — fail when a workflow `uses:` an action pinned to a mutable tag/branch
+  instead of a full commit SHA (only fires on workflow manifests).
 
 - `allow` — adjudicated exceptions that keep strict rules usable on real dependency trees:
   `installScripts` lists packages permitted to run install scripts (legitimate native binaries

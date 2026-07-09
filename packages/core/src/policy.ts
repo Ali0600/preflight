@@ -29,6 +29,9 @@ export interface Policy {
     /** Fail when the target runtime itself is past end-of-life (endoflife.date) — a
      * report-level rule: no dependency bump fixes a dead interpreter. */
     eolRuntime?: boolean;
+    /** Fail when a workflow `uses:` an action pinned to a mutable tag/branch instead of a
+     * full commit SHA (the tj-actions compromise vector). Only fires on actions manifests. */
+    unpinnedAction?: boolean;
   };
   /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
    * Shared config-file home for the CLI/Action (flags override). */
@@ -148,6 +151,13 @@ export function evaluatePolicy(
     }
     if (rules.deprecated && f.deprecated) {
       violations.push({ rule: 'deprecated', dep: at, detail: f.deprecated });
+    }
+    if (rules.unpinnedAction && f.mutableRef) {
+      violations.push({
+        rule: 'unpinned-action',
+        dep: at,
+        detail: `uses a mutable ref "@${f.range}" — pin the full commit SHA`,
+      });
     }
     if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
       violations.push({ rule: 'license', dep: at, detail: f.license });

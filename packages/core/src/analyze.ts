@@ -117,9 +117,13 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
 
+  // Registry-style lookups (latest/health/runtimes/downloads/typosquat) only make sense for
+  // package registries — an `actions` manifest gets OSV (+ KEV/EPSS) and the mutable-ref check.
+  const registryEco = ecosystem !== 'actions';
+
   // Runtime installability only applies to deps you version yourself (direct), against
   // the runtime matching this manifest's ecosystem.
-  const runtimeTarget = opts.runtimes?.[ecosystem === 'npm' ? 'node' : 'python'];
+  const runtimeTarget = registryEco ? opts.runtimes?.[ecosystem === 'npm' ? 'node' : 'python'] : undefined;
 
   // Only frameworks actually present (by anchor package, e.g. `expo`, `next`) may claim
   // lockstep members — `react` in a Next-only manifest is not "Expo-coordinated" (#18).
@@ -127,6 +131,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
 
   // Typosquat heuristic (offline) up-front, so download counts can put numbers behind any hit.
   // Only deps a human chose (direct) — transitive names are registry-real.
+  // (For `actions` the curated list holds popular `owner/repo` uses — same attack, CI flavor.)
   const squatHits = new Map<string, string>(); // suspicious name -> the popular package it resembles
   for (const name of directNames) {
     const similarTo = typosquatOf(name, ecosystem);
@@ -134,11 +139,9 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   }
   // Download counts are fetched ONLY where they inform something (bounded fan-out, also on the
   // public web endpoints): typosquat candidates + their targets always; direct deps under --health.
-  const downloadNames = [
-    ...(opts.health ? directNames : []),
-    ...squatHits.keys(),
-    ...squatHits.values(),
-  ];
+  const downloadNames = registryEco
+    ? [...(opts.health ? directNames : []), ...squatHits.keys(), ...squatHits.values()]
+    : [];
 
   // Data sources that fail to fetch this run are collected (not cached — see the fetchers) so a
   // green gate that ran with, say, KEV unavailable can announce "exploited-status unknown".
@@ -150,8 +153,8 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
 
   const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol, downloadsMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
-    opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : undefined,
-    opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : undefined,
+    registryEco && opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : undefined,
+    registryEco && opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : undefined,
     runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : undefined,
     // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
     runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : undefined,
@@ -194,6 +197,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
           : undefined,
       // Adoption display for deps you chose, under --health.
       downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : undefined,
+      mutableRef: d.mutableRef,
       runtimeCompat: runtimeMeta
         ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget!, ecosystem)
         : undefined,
@@ -311,6 +315,20 @@ function describeSources(args: {
       status: 'skipped',
       detail: 'not needed — no CVEs to prioritize',
     });
+  }
+
+  // An actions manifest consults OSV (+ KEV/EPSS above) and the offline ref-pinning check —
+  // registry-style rows (freshness/health/downloads/runtimes) don't apply to it.
+  if (ecosystem === 'actions') {
+    const mutable = findings.filter((f) => f.mutableRef).length;
+    sources.push({
+      name: 'ref pinning (offline)',
+      status: 'ok',
+      detail: mutable
+        ? `${mutable} of ${findings.length} uses pinned to a mutable tag/branch — pin commit SHAs`
+        : `all ${findings.length} uses pinned to full commit SHAs`,
+    });
+    return sources;
   }
 
   // Registry freshness + license + deprecation — only under --latest (or a license/deprecated policy).

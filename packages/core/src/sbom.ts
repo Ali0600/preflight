@@ -17,7 +17,9 @@ function toolVersion(): string {
 // component in the dependency graph plus the vulnerabilities affecting them. Consumable by
 // OSV-Scanner, Dependency-Track, GitHub, etc.
 
-const PURL_SYS: Record<Ecosystem, string> = { npm: 'npm', PyPI: 'pypi' };
+// `github` is the purl type for GitHub repos — an action's `owner/repo` splits into purl
+// namespace/name naturally (pkg:github/actions/checkout@4.1.2).
+const PURL_SYS: Record<Ecosystem, string> = { npm: 'npm', PyPI: 'pypi', actions: 'github' };
 
 /** Package URL (purl) for a finding, e.g. `pkg:npm/left-pad@1.3.0`. */
 function purl(f: Finding, ecosystem: Ecosystem): string | undefined {

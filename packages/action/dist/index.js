@@ -31249,6 +31249,7 @@ var VERDICT_LABEL = {
 // ../core/src/manifest.ts
 var import_node_fs = require("fs");
 var import_node_path = require("path");
+var import_yaml2 = __toESM(require_dist2(), 1);
 
 // ../core/src/lockfiles.ts
 var import_yaml = __toESM(require_dist2(), 1);
@@ -31382,20 +31383,24 @@ function parseYarnBerry(text) {
 }
 
 // ../core/src/manifest.ts
-function ecosystemFor(file) {
-  const f = file.toLowerCase();
+var WORKFLOW_PATH = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+function ecosystemFor(path) {
+  if (WORKFLOW_PATH.test(path)) return "actions";
+  const f = (0, import_node_path.basename)(path).toLowerCase();
   if (f === "package.json") return "npm";
   if (f.startsWith("requirements") && f.endsWith(".txt")) return "PyPI";
-  throw new Error(`Unsupported manifest: ${file} (expected package.json or requirements*.txt)`);
+  throw new Error(
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, or .github/workflows/*.yml)`
+  );
 }
 function parseManifestContent(filename, content) {
-  const ecosystem = ecosystemFor((0, import_node_path.basename)(filename));
-  const dependencies = ecosystem === "npm" ? parseNpm(content) : parsePip(content);
+  const ecosystem = ecosystemFor(filename);
+  const dependencies = ecosystem === "npm" ? parseNpm(content) : ecosystem === "PyPI" ? parsePip(content) : parseWorkflow(content);
   return { ecosystem, path: filename, dependencies, lockfile: ecosystem === "npm" ? false : void 0 };
 }
 var NPM_LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 function parseManifest(path) {
-  ecosystemFor((0, import_node_path.basename)(path));
+  ecosystemFor(path);
   const manifest = parseManifestContent(path, (0, import_node_fs.readFileSync)(path, "utf8"));
   if (manifest.ecosystem === "npm") {
     const dir = (0, import_node_path.dirname)(path);
@@ -31450,6 +31455,40 @@ function enumerateNpmGraph(lock, declared) {
     });
   }
   return [...declared, ...transitive];
+}
+var FULL_SHA = /^[0-9a-f]{40}$/i;
+function exactActionVersion(ref) {
+  const m = ref.match(/^v?(\d+\.\d+\.\d+)$/);
+  return m?.[1];
+}
+function parseWorkflow(content) {
+  const doc = (0, import_yaml2.parse)(content);
+  const uses = [];
+  for (const job of Object.values(doc?.jobs ?? {})) {
+    if (job?.uses) uses.push(job.uses);
+    for (const step of job?.steps ?? []) if (step?.uses) uses.push(step.uses);
+  }
+  const deps = /* @__PURE__ */ new Map();
+  for (const u of uses) {
+    if (u.startsWith("./") || u.startsWith("docker://")) continue;
+    const at = u.lastIndexOf("@");
+    if (at <= 0) continue;
+    const [owner, repo] = u.slice(0, at).split("/");
+    const ref = u.slice(at + 1);
+    if (!owner || !repo) continue;
+    const name = `${owner}/${repo}`;
+    const key = `${name}@${ref}`;
+    if (deps.has(key)) continue;
+    deps.set(key, {
+      name,
+      range: ref,
+      version: exactActionVersion(ref),
+      dev: false,
+      direct: true,
+      mutableRef: !FULL_SHA.test(ref)
+    });
+  }
+  return [...deps.values()];
 }
 function parsePip(content) {
   const deps = [];
@@ -31542,8 +31581,204 @@ function warn(message) {
   console.warn(`preflight: ${message}`);
 }
 
+// ../core/src/semver.ts
+var VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/;
+function parseSemver(s) {
+  const m = s.trim().match(VERSION_RE);
+  if (!m) return void 0;
+  return {
+    major: Number(m[1]),
+    minor: Number(m[2]),
+    patch: Number(m[3]),
+    ...m[4] ? { prerelease: m[4].split(".") } : {}
+  };
+}
+function isPrereleaseSemver(v) {
+  return (v.prerelease?.length ?? 0) > 0;
+}
+function compareIds(a, b) {
+  const an = /^\d+$/.test(a);
+  const bn = /^\d+$/.test(b);
+  if (an && bn) return Number(a) - Number(b);
+  if (an) return -1;
+  if (bn) return 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+function compareSemver(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  if (a.patch !== b.patch) return a.patch - b.patch;
+  const ap = a.prerelease ?? [];
+  const bp = b.prerelease ?? [];
+  if (ap.length === 0 && bp.length === 0) return 0;
+  if (ap.length === 0) return 1;
+  if (bp.length === 0) return -1;
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    if (ap[i] === void 0) return -1;
+    if (bp[i] === void 0) return 1;
+    const c = compareIds(ap[i], bp[i]);
+    if (c !== 0) return c;
+  }
+  return 0;
+}
+var ZERO = { major: 0, minor: 0, patch: 0 };
+function sv(major, minor = 0, patch = 0) {
+  return { major, minor, patch };
+}
+function parsePartial(s) {
+  const t = s.trim().replace(/^v/, "");
+  if (t === "" || t === "*" || t.toLowerCase() === "x") return { parts: [0, 0, 0], given: 0 };
+  const m = t.match(/^(\d+)(?:\.(\d+|x|X|\*))?(?:\.(\d+|x|X|\*))?(?:-[0-9A-Za-z-.]+)?$/);
+  if (!m) return void 0;
+  const isNum = (p) => p !== void 0 && /^\d+$/.test(p);
+  const major = Number(m[1]);
+  if (!isNum(m[2])) return { parts: [major, 0, 0], given: 1 };
+  const minor = Number(m[2]);
+  if (!isNum(m[3])) return { parts: [major, minor, 0], given: 2 };
+  return { parts: [major, minor, Number(m[3])], given: 3 };
+}
+function partialInterval(s) {
+  const p = parsePartial(s);
+  if (!p) return void 0;
+  const [ma, mi, pa] = p.parts;
+  if (p.given === 0) return { lo: { v: ZERO, inclusive: true }, hi: null };
+  if (p.given === 1)
+    return { lo: { v: sv(ma), inclusive: true }, hi: { v: sv(ma + 1), inclusive: false } };
+  if (p.given === 2)
+    return { lo: { v: sv(ma, mi), inclusive: true }, hi: { v: sv(ma, mi + 1), inclusive: false } };
+  const exact = sv(ma, mi, pa);
+  return { lo: { v: exact, inclusive: true }, hi: { v: exact, inclusive: true } };
+}
+function comparatorInterval(raw) {
+  const s = raw.trim();
+  if (s === "") return void 0;
+  const opMatch = s.match(/^(>=|<=|>|<|=|\^|~)?\s*(.+)$/);
+  if (!opMatch) return void 0;
+  const op = opMatch[1] ?? "";
+  const rest = opMatch[2];
+  const p = parsePartial(rest);
+  if (!p) return void 0;
+  const [ma, mi, pa] = p.parts;
+  const v = sv(ma, mi, pa);
+  switch (op) {
+    case ">=":
+      return { lo: { v, inclusive: true }, hi: null };
+    case ">":
+      if (p.given === 1) return { lo: { v: sv(ma + 1), inclusive: true }, hi: null };
+      if (p.given === 2) return { lo: { v: sv(ma, mi + 1), inclusive: true }, hi: null };
+      return { lo: { v, inclusive: false }, hi: null };
+    case "<=":
+      if (p.given === 1) return { lo: null, hi: { v: sv(ma + 1), inclusive: false } };
+      if (p.given === 2) return { lo: null, hi: { v: sv(ma, mi + 1), inclusive: false } };
+      return { lo: null, hi: { v, inclusive: true } };
+    case "<":
+      return { lo: null, hi: { v, inclusive: false } };
+    case "^": {
+      let hi;
+      if (ma > 0 || p.given === 1) hi = sv(ma + 1);
+      else if (mi > 0 || p.given === 2) hi = sv(ma, mi + 1);
+      else hi = sv(ma, mi, pa + 1);
+      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
+    }
+    case "~": {
+      const hi = p.given <= 1 ? sv(ma + 1) : sv(ma, mi + 1);
+      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
+    }
+    default:
+      return partialInterval(rest);
+  }
+}
+function maxLo(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = compareSemver(a.v, b.v);
+  if (c !== 0) return c > 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
+}
+function minHi(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const c = compareSemver(a.v, b.v);
+  if (c !== 0) return c < 0 ? a : b;
+  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
+}
+function isEmpty(iv) {
+  if (iv.empty) return true;
+  if (!iv.lo || !iv.hi) return false;
+  const c = compareSemver(iv.lo.v, iv.hi.v);
+  if (c > 0) return true;
+  if (c === 0) return !(iv.lo.inclusive && iv.hi.inclusive);
+  return false;
+}
+function branchInterval(branch) {
+  const b = branch.trim();
+  if (b === "") return { lo: { v: ZERO, inclusive: true }, hi: null };
+  const hyphen = b.split(/\s+-\s+/);
+  if (hyphen.length === 2) {
+    const lo = partialInterval(hyphen[0]);
+    const hi = partialInterval(hyphen[1]);
+    if (!lo || !hi) return void 0;
+    return { lo: lo.lo, hi: hi.hi };
+  }
+  let acc = { lo: null, hi: null };
+  for (const part of b.split(/\s+/)) {
+    const iv = comparatorInterval(part);
+    if (!iv) return void 0;
+    acc = { lo: maxLo(acc.lo, iv.lo), hi: minHi(acc.hi, iv.hi) };
+  }
+  if (isEmpty(acc)) acc.empty = true;
+  return acc;
+}
+function rangeIntervals(range) {
+  const intervals = [];
+  let unparseable = false;
+  for (const branch of range.split("||")) {
+    const iv = branchInterval(branch);
+    if (iv) intervals.push(iv);
+    else unparseable = true;
+  }
+  return { intervals, unparseable };
+}
+function within(v, iv) {
+  if (isEmpty(iv)) return false;
+  if (iv.lo) {
+    const c = compareSemver(v, iv.lo.v);
+    if (c < 0 || c === 0 && !iv.lo.inclusive) return false;
+  }
+  if (iv.hi) {
+    const c = compareSemver(v, iv.hi.v);
+    if (c > 0 || c === 0 && !iv.hi.inclusive) return false;
+  }
+  return true;
+}
+function satisfies(version, range) {
+  const v = parseSemver(version);
+  if (!v) return void 0;
+  const { intervals, unparseable } = rangeIntervals(range);
+  if (intervals.some((iv) => within(v, iv))) return true;
+  return unparseable || intervals.length === 0 ? void 0 : false;
+}
+function intersects(a, b) {
+  if (isEmpty(a) || isEmpty(b)) return false;
+  const lo = maxLo(a.lo, b.lo);
+  const hi = minHi(a.hi, b.hi);
+  return !isEmpty({ lo, hi });
+}
+function rangeAdmitsSeries(range, target) {
+  const series = partialInterval(target);
+  if (!series) return void 0;
+  const { intervals, unparseable } = rangeIntervals(range);
+  if (intervals.some((iv) => intersects(iv, series))) return true;
+  return unparseable || intervals.length === 0 ? void 0 : false;
+}
+
 // ../core/src/osv.ts
 var OSV = "https://api.osv.dev";
+var OSV_ECOSYSTEM = {
+  npm: "npm",
+  PyPI: "PyPI",
+  actions: "GitHub Actions"
+};
 var OSV_BATCH = 1e3;
 function chunk(arr, size) {
   const out = [];
@@ -31567,6 +31802,7 @@ function severityOf(v) {
   return "unknown";
 }
 async function fetchVulns(deps, ecosystem, onDegraded) {
+  if (ecosystem === "actions") return fetchActionVulns(deps, onDegraded);
   const out = /* @__PURE__ */ new Map();
   const items = /* @__PURE__ */ new Map();
   for (const d of deps) if (d.version) items.set(`${d.name}@${d.version}`, { name: d.name, version: d.version });
@@ -31574,7 +31810,10 @@ async function fetchVulns(deps, ecosystem, onDegraded) {
   if (list.length === 0) return out;
   const results = (await Promise.all(
     chunk(list, OSV_BATCH).map((group) => {
-      const queries = group.map((d) => ({ package: { name: d.name, ecosystem }, version: d.version }));
+      const queries = group.map((d) => ({
+        package: { name: d.name, ecosystem: OSV_ECOSYSTEM[ecosystem] },
+        version: d.version
+      }));
       return cached(`osv:querybatch:${JSON.stringify(queries)}`, async () => {
         const res = await fetch(`${OSV}/v1/querybatch`, {
           method: "POST",
@@ -31622,6 +31861,110 @@ async function fetchVulns(deps, ecosystem, onDegraded) {
     );
   }
   return out;
+}
+async function fetchActionVulns(deps, onDegraded) {
+  const out = /* @__PURE__ */ new Map();
+  const names = [...new Set(deps.map((d) => d.name))];
+  await Promise.all(
+    names.map(async (name) => {
+      let advisories;
+      try {
+        advisories = await cached(`osv:actions:${name}`, () => queryActionAdvisories(name));
+      } catch (err) {
+        warn(`OSV lookup failed for action ${name}: ${err.message}`);
+        onDegraded?.("OSV advisory details");
+        return;
+      }
+      if (advisories.length === 0) return;
+      for (const d of deps.filter((x) => x.name === name)) {
+        const matched = advisories.filter((a) => actionAffected(a, d.version)).map((a) => a.vuln);
+        if (matched.length > 0) out.set(`${d.name}@${d.version}`, matched);
+      }
+    })
+  );
+  return out;
+}
+async function queryActionAdvisories(name) {
+  const raw = [];
+  let pageToken;
+  do {
+    const res = await fetch(`${OSV}/v1/query`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        package: { name, ecosystem: OSV_ECOSYSTEM.actions },
+        ...pageToken ? { page_token: pageToken } : {}
+      })
+    });
+    if (!res.ok) throw new Error(`OSV query failed: ${res.status}`);
+    const j = await res.json();
+    raw.push(...j.vulns ?? []);
+    pageToken = j.next_page_token;
+  } while (pageToken);
+  return raw.map((v) => {
+    const mine = (v.affected ?? []).filter((a) => a.package?.name === name);
+    const spans = [];
+    let sawAnyRange = false;
+    for (const a of mine) {
+      for (const r of a.ranges ?? []) {
+        sawAnyRange = true;
+        if (r.type !== "ECOSYSTEM") continue;
+        let open2;
+        for (const e of r.events ?? []) {
+          if (e.introduced !== void 0) {
+            open2 = { introduced: e.introduced };
+            spans.push(open2);
+          } else if (open2 && e.fixed !== void 0) {
+            open2.fixed = e.fixed;
+            open2 = void 0;
+          } else if (open2 && e.last_affected !== void 0) {
+            open2.lastAffected = e.last_affected;
+            open2 = void 0;
+          }
+        }
+      }
+    }
+    const versions = mine.flatMap((a) => a.versions ?? []);
+    const malicious = v.id.startsWith("MAL-");
+    return {
+      vuln: {
+        id: v.id,
+        summary: v.summary ?? v.details?.slice(0, 120) ?? v.id,
+        severity: malicious ? "critical" : severityOf(v),
+        cve: v.id.startsWith("CVE-") ? v.id : (v.aliases ?? []).find((a) => a.startsWith("CVE-")),
+        malicious: malicious || void 0
+      },
+      spans,
+      versions,
+      unscoped: !sawAnyRange && versions.length === 0
+    };
+  });
+}
+function padSemver(s) {
+  const parts = s.trim().replace(/^v/, "").split(".");
+  if (!parts.every((p) => /^\d+$/.test(p))) return parseSemver(s);
+  while (parts.length < 3) parts.push("0");
+  return parseSemver(parts.join("."));
+}
+function actionAffected(a, version) {
+  if (a.unscoped) return true;
+  if (!version) return false;
+  if (a.versions.some((v) => v === version || v === `v${version}`)) return true;
+  const used = parseSemver(version);
+  if (!used) return false;
+  return a.spans.some((s) => {
+    const intro = padSemver(s.introduced);
+    if (intro && compareSemver(used, intro) < 0) return false;
+    if (s.fixed !== void 0) {
+      const fixed = padSemver(s.fixed);
+      return fixed ? compareSemver(used, fixed) < 0 : true;
+    }
+    if (s.lastAffected !== void 0) {
+      const last = padSemver(s.lastAffected);
+      return last ? compareSemver(used, last) <= 0 : true;
+    }
+    return true;
+  });
 }
 
 // ../core/src/registry.ts
@@ -31902,6 +32245,27 @@ var POPULAR = {
     "openai",
     "anyio",
     "attrs"
+  ],
+  // High-value `uses:` targets — a one-edit owner/repo (`action/checkout`, `actions/checkout2`)
+  // is the workflow flavor of the same attack. Names are `owner/repo`; normalize keeps the `/`.
+  actions: [
+    "actions/checkout",
+    "actions/setup-node",
+    "actions/setup-python",
+    "actions/setup-java",
+    "actions/setup-go",
+    "actions/cache",
+    "actions/upload-artifact",
+    "actions/download-artifact",
+    "actions/github-script",
+    "github/codeql-action",
+    "docker/build-push-action",
+    "docker/setup-buildx-action",
+    "docker/login-action",
+    "softprops/action-gh-release",
+    "peaceiris/actions-gh-pages",
+    "codecov/codecov-action",
+    "pypa/gh-action-pypi-publish"
   ]
 };
 function normalize(name) {
@@ -31909,7 +32273,8 @@ function normalize(name) {
 }
 var NORM = {
   npm: new Set(POPULAR.npm.map(normalize)),
-  PyPI: new Set(POPULAR.PyPI.map(normalize))
+  PyPI: new Set(POPULAR.PyPI.map(normalize)),
+  actions: new Set(POPULAR.actions.map(normalize))
 };
 function isOneEditApart(a, b) {
   if (a === b || Math.abs(a.length - b.length) > 1) return false;
@@ -32264,6 +32629,13 @@ function evaluatePolicy(findings, policy, context3 = {}) {
     if (rules.deprecated && f.deprecated) {
       violations.push({ rule: "deprecated", dep: at, detail: f.deprecated });
     }
+    if (rules.unpinnedAction && f.mutableRef) {
+      violations.push({
+        rule: "unpinned-action",
+        dep: at,
+        detail: `uses a mutable ref "@${f.range}" \u2014 pin the full commit SHA`
+      });
+    }
     if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
       violations.push({ rule: "license", dep: at, detail: f.license });
     }
@@ -32393,7 +32765,7 @@ async function fetchRuntimeEol(target, onDegraded) {
 }
 
 // ../core/src/pep440.ts
-var VERSION_RE = new RegExp(
+var VERSION_RE2 = new RegExp(
   "^v?(?:(\\d+)!)?(\\d+(?:\\.\\d+)*)(?:[._-]?(a|alpha|b|beta|c|rc|pre|preview)[._-]?(\\d*))?(?:(?:-(\\d+))|(?:[._-]?(?:post|rev|r)[._-]?(\\d*)))?(?:[._-]?dev[._-]?(\\d*))?(?:\\+[a-z0-9]+(?:[._-][a-z0-9]+)*)?$",
   // local (parsed, ignored for ordering)
   "i"
@@ -32409,7 +32781,7 @@ var PRE_NORMALIZE = {
   preview: "rc"
 };
 function parsePep440(s) {
-  const m = s.trim().match(VERSION_RE);
+  const m = s.trim().match(VERSION_RE2);
   if (!m) return void 0;
   const out = {
     epoch: m[1] ? Number(m[1]) : 0,
@@ -32611,197 +32983,6 @@ function specifierAdmitsSeries(specifiers, target) {
   return true;
 }
 
-// ../core/src/semver.ts
-var VERSION_RE2 = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/;
-function parseSemver(s) {
-  const m = s.trim().match(VERSION_RE2);
-  if (!m) return void 0;
-  return {
-    major: Number(m[1]),
-    minor: Number(m[2]),
-    patch: Number(m[3]),
-    ...m[4] ? { prerelease: m[4].split(".") } : {}
-  };
-}
-function isPrereleaseSemver(v) {
-  return (v.prerelease?.length ?? 0) > 0;
-}
-function compareIds(a, b) {
-  const an = /^\d+$/.test(a);
-  const bn = /^\d+$/.test(b);
-  if (an && bn) return Number(a) - Number(b);
-  if (an) return -1;
-  if (bn) return 1;
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-function compareSemver(a, b) {
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  if (a.patch !== b.patch) return a.patch - b.patch;
-  const ap = a.prerelease ?? [];
-  const bp = b.prerelease ?? [];
-  if (ap.length === 0 && bp.length === 0) return 0;
-  if (ap.length === 0) return 1;
-  if (bp.length === 0) return -1;
-  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
-    if (ap[i] === void 0) return -1;
-    if (bp[i] === void 0) return 1;
-    const c = compareIds(ap[i], bp[i]);
-    if (c !== 0) return c;
-  }
-  return 0;
-}
-var ZERO = { major: 0, minor: 0, patch: 0 };
-function sv(major, minor = 0, patch = 0) {
-  return { major, minor, patch };
-}
-function parsePartial(s) {
-  const t = s.trim().replace(/^v/, "");
-  if (t === "" || t === "*" || t.toLowerCase() === "x") return { parts: [0, 0, 0], given: 0 };
-  const m = t.match(/^(\d+)(?:\.(\d+|x|X|\*))?(?:\.(\d+|x|X|\*))?(?:-[0-9A-Za-z-.]+)?$/);
-  if (!m) return void 0;
-  const isNum = (p) => p !== void 0 && /^\d+$/.test(p);
-  const major = Number(m[1]);
-  if (!isNum(m[2])) return { parts: [major, 0, 0], given: 1 };
-  const minor = Number(m[2]);
-  if (!isNum(m[3])) return { parts: [major, minor, 0], given: 2 };
-  return { parts: [major, minor, Number(m[3])], given: 3 };
-}
-function partialInterval(s) {
-  const p = parsePartial(s);
-  if (!p) return void 0;
-  const [ma, mi, pa] = p.parts;
-  if (p.given === 0) return { lo: { v: ZERO, inclusive: true }, hi: null };
-  if (p.given === 1)
-    return { lo: { v: sv(ma), inclusive: true }, hi: { v: sv(ma + 1), inclusive: false } };
-  if (p.given === 2)
-    return { lo: { v: sv(ma, mi), inclusive: true }, hi: { v: sv(ma, mi + 1), inclusive: false } };
-  const exact = sv(ma, mi, pa);
-  return { lo: { v: exact, inclusive: true }, hi: { v: exact, inclusive: true } };
-}
-function comparatorInterval(raw) {
-  const s = raw.trim();
-  if (s === "") return void 0;
-  const opMatch = s.match(/^(>=|<=|>|<|=|\^|~)?\s*(.+)$/);
-  if (!opMatch) return void 0;
-  const op = opMatch[1] ?? "";
-  const rest = opMatch[2];
-  const p = parsePartial(rest);
-  if (!p) return void 0;
-  const [ma, mi, pa] = p.parts;
-  const v = sv(ma, mi, pa);
-  switch (op) {
-    case ">=":
-      return { lo: { v, inclusive: true }, hi: null };
-    case ">":
-      if (p.given === 1) return { lo: { v: sv(ma + 1), inclusive: true }, hi: null };
-      if (p.given === 2) return { lo: { v: sv(ma, mi + 1), inclusive: true }, hi: null };
-      return { lo: { v, inclusive: false }, hi: null };
-    case "<=":
-      if (p.given === 1) return { lo: null, hi: { v: sv(ma + 1), inclusive: false } };
-      if (p.given === 2) return { lo: null, hi: { v: sv(ma, mi + 1), inclusive: false } };
-      return { lo: null, hi: { v, inclusive: true } };
-    case "<":
-      return { lo: null, hi: { v, inclusive: false } };
-    case "^": {
-      let hi;
-      if (ma > 0 || p.given === 1) hi = sv(ma + 1);
-      else if (mi > 0 || p.given === 2) hi = sv(ma, mi + 1);
-      else hi = sv(ma, mi, pa + 1);
-      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
-    }
-    case "~": {
-      const hi = p.given <= 1 ? sv(ma + 1) : sv(ma, mi + 1);
-      return { lo: { v, inclusive: true }, hi: { v: hi, inclusive: false } };
-    }
-    default:
-      return partialInterval(rest);
-  }
-}
-function maxLo(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  const c = compareSemver(a.v, b.v);
-  if (c !== 0) return c > 0 ? a : b;
-  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
-}
-function minHi(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  const c = compareSemver(a.v, b.v);
-  if (c !== 0) return c < 0 ? a : b;
-  return a.inclusive && b.inclusive ? a : { v: a.v, inclusive: false };
-}
-function isEmpty(iv) {
-  if (iv.empty) return true;
-  if (!iv.lo || !iv.hi) return false;
-  const c = compareSemver(iv.lo.v, iv.hi.v);
-  if (c > 0) return true;
-  if (c === 0) return !(iv.lo.inclusive && iv.hi.inclusive);
-  return false;
-}
-function branchInterval(branch) {
-  const b = branch.trim();
-  if (b === "") return { lo: { v: ZERO, inclusive: true }, hi: null };
-  const hyphen = b.split(/\s+-\s+/);
-  if (hyphen.length === 2) {
-    const lo = partialInterval(hyphen[0]);
-    const hi = partialInterval(hyphen[1]);
-    if (!lo || !hi) return void 0;
-    return { lo: lo.lo, hi: hi.hi };
-  }
-  let acc = { lo: null, hi: null };
-  for (const part of b.split(/\s+/)) {
-    const iv = comparatorInterval(part);
-    if (!iv) return void 0;
-    acc = { lo: maxLo(acc.lo, iv.lo), hi: minHi(acc.hi, iv.hi) };
-  }
-  if (isEmpty(acc)) acc.empty = true;
-  return acc;
-}
-function rangeIntervals(range) {
-  const intervals = [];
-  let unparseable = false;
-  for (const branch of range.split("||")) {
-    const iv = branchInterval(branch);
-    if (iv) intervals.push(iv);
-    else unparseable = true;
-  }
-  return { intervals, unparseable };
-}
-function within(v, iv) {
-  if (isEmpty(iv)) return false;
-  if (iv.lo) {
-    const c = compareSemver(v, iv.lo.v);
-    if (c < 0 || c === 0 && !iv.lo.inclusive) return false;
-  }
-  if (iv.hi) {
-    const c = compareSemver(v, iv.hi.v);
-    if (c > 0 || c === 0 && !iv.hi.inclusive) return false;
-  }
-  return true;
-}
-function satisfies(version, range) {
-  const v = parseSemver(version);
-  if (!v) return void 0;
-  const { intervals, unparseable } = rangeIntervals(range);
-  if (intervals.some((iv) => within(v, iv))) return true;
-  return unparseable || intervals.length === 0 ? void 0 : false;
-}
-function intersects(a, b) {
-  if (isEmpty(a) || isEmpty(b)) return false;
-  const lo = maxLo(a.lo, b.lo);
-  const hi = minHi(a.hi, b.hi);
-  return !isEmpty({ lo, hi });
-}
-function rangeAdmitsSeries(range, target) {
-  const series = partialInterval(target);
-  if (!series) return void 0;
-  const { intervals, unparseable } = rangeIntervals(range);
-  if (intervals.some((iv) => intersects(iv, series))) return true;
-  return unparseable || intervals.length === 0 ? void 0 : false;
-}
-
 // ../core/src/runtime-compat.ts
 function orderedReleases(meta, ecosystem) {
   const out = [];
@@ -32983,26 +33164,23 @@ async function analyzeManifest(manifest, opts = {}) {
   }
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
-  const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
+  const registryEco = ecosystem !== "actions";
+  const runtimeTarget = registryEco ? opts.runtimes?.[ecosystem === "npm" ? "node" : "python"] : void 0;
   const frameworks = presentFrameworks(directNames);
   const squatHits = /* @__PURE__ */ new Map();
   for (const name of directNames) {
     const similarTo = typosquatOf(name, ecosystem);
     if (similarTo) squatHits.set(name, similarTo);
   }
-  const downloadNames = [
-    ...opts.health ? directNames : [],
-    ...squatHits.keys(),
-    ...squatHits.values()
-  ];
+  const downloadNames = registryEco ? [...opts.health ? directNames : [], ...squatHits.keys(), ...squatHits.values()] : [];
   const degraded = /* @__PURE__ */ new Set();
   const onDegraded = (source) => {
     degraded.add(source);
   };
   const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol, downloadsMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
-    opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : void 0,
-    opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : void 0,
+    registryEco && opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : void 0,
+    registryEco && opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : void 0,
     runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : void 0,
     // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
     runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : void 0,
@@ -33042,6 +33220,7 @@ async function analyzeManifest(manifest, opts = {}) {
       } : void 0,
       // Adoption display for deps you chose, under --health.
       downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : void 0,
+      mutableRef: d.mutableRef,
       runtimeCompat: runtimeMeta ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget, ecosystem) : void 0
     };
     const { verdict, reason } = decideVerdict(base);
@@ -33126,6 +33305,15 @@ function describeSources(args) {
       status: "skipped",
       detail: "not needed \u2014 no CVEs to prioritize"
     });
+  }
+  if (ecosystem === "actions") {
+    const mutable = findings.filter((f) => f.mutableRef).length;
+    sources.push({
+      name: "ref pinning (offline)",
+      status: "ok",
+      detail: mutable ? `${mutable} of ${findings.length} uses pinned to a mutable tag/branch \u2014 pin commit SHAs` : `all ${findings.length} uses pinned to full commit SHAs`
+    });
+    return sources;
   }
   const deprecatedCount = findings.filter((f) => f.deprecated).length;
   sources.push(
@@ -33539,7 +33727,7 @@ function renderComment(results, skipped = []) {
 }
 
 // src/index.ts
-var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
+var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 var LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 var LOCKFILE_NAMES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 function resolveRuntimes(policy) {
@@ -33691,8 +33879,8 @@ function findManifests(root) {
     for (const e of (0, import_node_fs6.readdirSync)(dir, { withFileTypes: true })) {
       const p = (0, import_node_path5.join)(dir, e.name);
       if (e.isDirectory()) {
-        if (!e.name.startsWith(".") && !skip.has(e.name)) walk(p);
-      } else if (MANIFEST.test(e.name)) {
+        if ((!e.name.startsWith(".") || e.name === ".github") && !skip.has(e.name)) walk(p);
+      } else if (MANIFEST.test(p)) {
         out.push(p);
       }
     }

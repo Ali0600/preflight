@@ -1,7 +1,10 @@
 // Shared types for the Preflight engine. The CLI, GitHub Action, and web dashboard
 // all consume these — keep this the single source of truth.
 
-export type Ecosystem = 'npm' | 'PyPI';
+/** `actions` = GitHub Actions workflows (`.github/workflows/*.yml`): the "packages" are the
+ * `uses:` entries, queried against OSV's "GitHub Actions" ecosystem. Registry-style lookups
+ * (latest/health/runtimes/downloads) don't apply to it. */
+export type Ecosystem = 'npm' | 'PyPI' | 'actions';
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
@@ -45,6 +48,9 @@ export interface Dependency {
   direct?: boolean;
   /** Runs a pre/post/install script (npm lockfile `hasInstallScript`) — code on `npm install`. */
   installScript?: boolean;
+  /** GitHub Actions only: the `uses:` ref is a tag/branch, not a full commit SHA — the ref can
+   * be moved to different code after review (the tj-actions compromise vector). */
+  mutableRef?: boolean;
 }
 
 export interface Manifest {
@@ -144,6 +150,8 @@ export interface Finding {
   downloadsPerWeek?: number;
   /** How the dep relates to the target runtime, when one was declared (absent = compatible). */
   runtimeCompat?: RuntimeCompat;
+  /** GitHub Actions only: `uses:` pinned to a mutable tag/branch instead of a commit SHA. */
+  mutableRef?: boolean;
   verdict: Verdict;
   reason: string;
 }

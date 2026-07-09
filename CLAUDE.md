@@ -22,15 +22,24 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
-    each `Finding`/`Dependency` tagged `direct`) / requirements.txt. OSV scans the whole graph;
-    `--latest`/`--health` apply to direct deps only. Lockfile discovery order:
-    package-lock.json → pnpm-lock.yaml → yarn.lock (npm's has the richest metadata).
+    each `Finding`/`Dependency` tagged `direct`) / requirements.txt / **`.github/workflows/*.yml`**
+    (ecosystem `actions`: `uses:` entries → deps named `owner/repo`, `mutableRef` when the ref
+    isn't a full SHA, `version` only for exact `vX.Y.Z` refs; matched on the whole path so a random
+    `foo.yml` never parses). OSV scans the whole graph; `--latest`/`--health` apply to direct deps
+    only. Lockfile discovery order: package-lock.json → pnpm-lock.yaml → yarn.lock (npm's has the
+    richest metadata). For `actions`, registry-style lookups (latest/health/runtimes/downloads) are
+    forced off in `analyze` — only OSV + KEV/EPSS + typosquat (curated actions list) + ref pinning.
   - `lockfiles.ts` — pnpm (v5/v6/v9) + yarn (classic v1 + berry) graph parsers (`yaml` dep,
     bundled by tsup). Scope: transitive deps get `dev: false` (reconstructing dev-only
     reachability needs a graph walk — conservative, scans MORE); `installScript` only where the
     format exposes it (pnpm v5/v6 `requiresBuild`), never fabricated. Action PR-mode triggers on
     all three lockfile names and fetches whichever the base tree has.
-  - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
+  - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as
+    malicious). **GitHub Actions is a separate path**: OSV does NOT evaluate versioned queries for
+    that ecosystem (verified live 2026-07-09 — known-affected versions return `{}`), so
+    `fetchActionVulns` queries per package and matches ECOSYSTEM ranges **locally** (semver, partial
+    boundaries like "41" padded). Floating tags/SHA refs aren't range-matched (mutable-ref warning
+    covers them); an advisory with NO scoping data attaches to every ref (fail-safe for MAL)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
   - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
   - `eol.ts` — endoflife.date runtime EOL (one fetch per product; `cycleOf` maps Node→major,
