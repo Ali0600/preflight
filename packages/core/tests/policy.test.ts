@@ -239,3 +239,21 @@ describe('evaluatePolicy — deprecated rule', () => {
     });
   });
 });
+
+describe('evaluatePolicy — eol-runtime rule (report-level)', () => {
+  const eol = { runtime: 'node' as const, cycle: '18', eol: '2025-04-30', isEol: true, daysUntilEol: -400 };
+
+  it('fails only when the rule is on AND the runtime is actually EOL', () => {
+    const none = evaluatePolicy([], { failOn: { eolRuntime: true } });
+    expect(none.fail).toBe(false); // no runtime context at all
+    const alive = evaluatePolicy([], { failOn: { eolRuntime: true } }, { runtimeEol: { ...eol, isEol: false } });
+    expect(alive.fail).toBe(false);
+    const dead = evaluatePolicy([], { failOn: { eolRuntime: true } }, { runtimeEol: eol });
+    expect(dead.fail).toBe(true);
+    expect(dead.violations[0]).toMatchObject({ rule: 'eol-runtime', dep: 'node 18' });
+  });
+
+  it('ignores an EOL runtime when the rule is off', () => {
+    expect(evaluatePolicy([], {}, { runtimeEol: eol }).fail).toBe(false);
+  });
+});

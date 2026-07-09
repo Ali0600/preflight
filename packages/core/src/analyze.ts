@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
 import { fetchHealth, type HealthInfo } from './depsdev';
+import { fetchRuntimeEol } from './eol';
 import { fetchEpss } from './epss';
 import { fetchKev } from './kev';
 import { lockstepFor, presentFrameworks } from './lockstep';
@@ -18,6 +19,7 @@ import type {
   Finding,
   Manifest,
   Report,
+  RuntimeEol,
   RuntimeName,
   RuntimeTarget,
   Verdict,
@@ -130,11 +132,13 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     degraded.add(source);
   };
 
-  const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
+  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
     opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : undefined,
     opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : undefined,
     runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : undefined,
+    // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
+    runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : undefined,
   ]);
   await enrichExploitability(vulnMap, onDegraded); // EPSS + KEV — only fires when CVEs were found
 
@@ -188,6 +192,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     findings,
     summary,
     runtimeTarget,
+    runtimeEol,
     lockfile: manifest.lockfile,
     degraded: degraded.size ? [...degraded] : undefined,
     sources: describeSources({
@@ -197,6 +202,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       degraded,
       opts,
       runtimeTarget,
+      runtimeEol,
       directCount: directNames.length,
     }),
   };
@@ -213,9 +219,10 @@ function describeSources(args: {
   degraded: Set<string>;
   opts: AnalyzeOptions;
   runtimeTarget?: RuntimeTarget;
+  runtimeEol?: RuntimeEol;
   directCount: number;
 }): DataSource[] {
-  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, directCount } = args;
+  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, runtimeEol, directCount } = args;
   const down = (s: string): boolean => degraded.has(s);
   const registry = ecosystem === 'npm' ? 'npm registry' : 'PyPI';
   const sources: DataSource[] = [];
@@ -311,9 +318,35 @@ function describeSources(args: {
         ? `unreachable — compatibility with ${runtimeLabel(runtimeTarget)} unverified`
         : `checked ${directCount} direct dep(s) against ${runtimeLabel(runtimeTarget)}${incompat ? ` → ${incompat} incompatible` : ''}`,
     });
+
+    // Runtime end-of-life — consulted whenever a target runtime is set.
+    sources.push({
+      name: 'endoflife.date (runtime EOL)',
+      status: down('endoflife.date') ? 'degraded' : 'ok',
+      detail: down('endoflife.date')
+        ? `unreachable — EOL status of ${runtimeLabel(runtimeTarget)} unknown this run`
+        : describeEol(runtimeTarget, runtimeEol),
+    });
+  } else {
+    sources.push({
+      name: 'endoflife.date (runtime EOL)',
+      status: 'skipped',
+      detail: 'not run — no target runtime declared or detected',
+    });
   }
 
   return sources;
+}
+
+/** One ledger line for the runtime's EOL status (the source itself was reachable). */
+function describeEol(target: RuntimeTarget, eol?: RuntimeEol): string {
+  if (!eol) return `${runtimeLabel(target)} — release cycle unknown to endoflife.date`;
+  const name = runtimeLabel(target);
+  if (eol.isEol) return `${name} reached end-of-life${eol.eol ? ` on ${eol.eol}` : ''} — no security fixes`;
+  if (eol.daysUntilEol !== undefined && eol.daysUntilEol <= 90) {
+    return `${name} reaches end-of-life on ${eol.eol} (${eol.daysUntilEol} days)`;
+  }
+  return eol.eol ? `${name} supported until ${eol.eol}` : `${name} — no end-of-life date published`;
 }
 
 /** Attach EPSS (exploit probability) + CISA KEV (confirmed-exploited) to each found advisory.

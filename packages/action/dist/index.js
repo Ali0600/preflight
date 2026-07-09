@@ -24667,7 +24667,7 @@ function licenseDenied(license, deny) {
     return license.toLowerCase() === dl;
   });
 }
-function evaluatePolicy(findings, policy) {
+function evaluatePolicy(findings, policy, context3 = {}) {
   const rules = policy.failOn ?? {};
   const allowScripts = new Set(policy.allow?.installScripts ?? []);
   const allowAdvisories = new Set(policy.allow?.advisories ?? []);
@@ -24731,6 +24731,14 @@ function evaluatePolicy(findings, policy) {
         });
       }
     }
+  }
+  if (rules.eolRuntime && context3.runtimeEol?.isEol) {
+    const e = context3.runtimeEol;
+    violations.push({
+      rule: "eol-runtime",
+      dep: `${e.runtime} ${e.cycle}`,
+      detail: `runtime reached end-of-life${e.eol ? ` on ${e.eol}` : ""} \u2014 no security fixes`
+    });
   }
   return { violations, fail: violations.length > 0, suppressed };
 }
@@ -24797,6 +24805,39 @@ async function fetchRuntimeMetaAll(names, ecosystem, onDegraded) {
     })
   );
   return out;
+}
+
+// ../core/src/eol.ts
+var EOL_API = "https://endoflife.date/api";
+var PRODUCT = { node: "nodejs", python: "python" };
+function cycleOf(runtime, version) {
+  const parts = version.split(".").filter((p) => /^\d+$/.test(p));
+  if (runtime === "node") return parts[0];
+  return parts.length >= 2 ? `${parts[0]}.${parts[1]}` : void 0;
+}
+async function fetchRuntimeEol(target, onDegraded) {
+  const cycle = cycleOf(target.runtime, target.version);
+  if (!cycle) return void 0;
+  try {
+    const cycles = await cached(`eol:${target.runtime}`, async () => {
+      const r = await fetch(`${EOL_API}/${PRODUCT[target.runtime]}.json`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      const rows = (Array.isArray(j) ? j : []).filter((c) => c.cycle !== void 0 && c.eol !== void 0).map((c) => ({ cycle: String(c.cycle), eol: c.eol, latest: c.latest }));
+      if (rows.length === 0) throw new Error("empty cycle list");
+      return rows;
+    });
+    const hit = cycles.find((c) => c.cycle === cycle);
+    if (!hit) return void 0;
+    const eolDate = typeof hit.eol === "string" ? hit.eol : void 0;
+    const daysUntilEol = eolDate ? Math.ceil((new Date(eolDate).getTime() - Date.now()) / (24 * 60 * 60 * 1e3)) : void 0;
+    const isEol = hit.eol === true || daysUntilEol !== void 0 && daysUntilEol <= 0;
+    return { runtime: target.runtime, cycle, eol: eolDate, isEol, daysUntilEol, latest: hit.latest };
+  } catch (err) {
+    warn(`endoflife.date lookup failed for ${target.runtime}: ${err.message}`);
+    onDegraded?.("endoflife.date");
+    return void 0;
+  }
 }
 
 // ../core/src/pep440.ts
@@ -25396,11 +25437,13 @@ async function analyzeManifest(manifest, opts = {}) {
   const onDegraded = (source) => {
     degraded.add(source);
   };
-  const [vulnMap, registryMap, healthMap, runtimeMap] = await Promise.all([
+  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
     opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : void 0,
     opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : void 0,
-    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : void 0
+    runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : void 0,
+    // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
+    runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : void 0
   ]);
   await enrichExploitability(vulnMap, onDegraded);
   const findings = dependencies.map((d) => {
@@ -25450,6 +25493,7 @@ async function analyzeManifest(manifest, opts = {}) {
     findings,
     summary: summary2,
     runtimeTarget,
+    runtimeEol,
     lockfile: manifest.lockfile,
     degraded: degraded.size ? [...degraded] : void 0,
     sources: describeSources({
@@ -25459,12 +25503,13 @@ async function analyzeManifest(manifest, opts = {}) {
       degraded,
       opts,
       runtimeTarget,
+      runtimeEol,
       directCount: directNames.length
     })
   };
 }
 function describeSources(args) {
-  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, directCount } = args;
+  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, runtimeEol, directCount } = args;
   const down = (s) => degraded.has(s);
   const registry = ecosystem === "npm" ? "npm registry" : "PyPI";
   const sources = [];
@@ -25530,8 +25575,28 @@ function describeSources(args) {
       status: down(registry) ? "degraded" : "ok",
       detail: down(registry) ? `unreachable \u2014 compatibility with ${runtimeLabel(runtimeTarget)} unverified` : `checked ${directCount} direct dep(s) against ${runtimeLabel(runtimeTarget)}${incompat ? ` \u2192 ${incompat} incompatible` : ""}`
     });
+    sources.push({
+      name: "endoflife.date (runtime EOL)",
+      status: down("endoflife.date") ? "degraded" : "ok",
+      detail: down("endoflife.date") ? `unreachable \u2014 EOL status of ${runtimeLabel(runtimeTarget)} unknown this run` : describeEol(runtimeTarget, runtimeEol)
+    });
+  } else {
+    sources.push({
+      name: "endoflife.date (runtime EOL)",
+      status: "skipped",
+      detail: "not run \u2014 no target runtime declared or detected"
+    });
   }
   return sources;
+}
+function describeEol(target, eol) {
+  if (!eol) return `${runtimeLabel(target)} \u2014 release cycle unknown to endoflife.date`;
+  const name = runtimeLabel(target);
+  if (eol.isEol) return `${name} reached end-of-life${eol.eol ? ` on ${eol.eol}` : ""} \u2014 no security fixes`;
+  if (eol.daysUntilEol !== void 0 && eol.daysUntilEol <= 90) {
+    return `${name} reaches end-of-life on ${eol.eol} (${eol.daysUntilEol} days)`;
+  }
+  return eol.eol ? `${name} supported until ${eol.eol}` : `${name} \u2014 no end-of-life date published`;
 }
 async function enrichExploitability(vulnMap, onDegraded) {
   const vulns = [...new Set([...vulnMap.values()].flat())];
@@ -25578,6 +25643,25 @@ function renderSources(sources) {
   return lines;
 }
 var STATUS_RANK = { skipped: 0, ok: 1, degraded: 2 };
+function renderRuntimeEol(reports) {
+  const lines = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const r of reports) {
+    const e = r.runtimeEol;
+    if (!e || seen.has(`${e.runtime}:${e.cycle}`)) continue;
+    seen.add(`${e.runtime}:${e.cycle}`);
+    const name = `${e.runtime === "node" ? "Node" : "Python"} ${e.cycle}`;
+    if (e.isEol) {
+      lines.push(
+        `> \u{1FAAB} **${name} is end-of-life**${e.eol ? ` (since ${e.eol})` : ""} \u2014 the runtime gets no security fixes; no dependency bump fixes that.`,
+        ""
+      );
+    } else if (e.daysUntilEol !== void 0 && e.daysUntilEol <= 90) {
+      lines.push(`> \u{1FAAB} **${name} reaches end-of-life on ${e.eol}** (${e.daysUntilEol} days) \u2014 plan the upgrade.`, "");
+    }
+  }
+  return lines;
+}
 function aggregateSources(reports) {
   const byName = /* @__PURE__ */ new Map();
   for (const r of reports) {
@@ -25748,6 +25832,7 @@ function renderRepoIssue(reports, skipped = [], ignored = [], allowAdvisories = 
       ""
     );
   }
+  lines.push(...renderRuntimeEol(reports));
   lines.push(...renderSources(aggregateSources(reports)));
   lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
   return { body: lines.join("\n"), count };
@@ -25853,6 +25938,8 @@ function renderComment(results, skipped = []) {
       `> \u26A0\uFE0F **Degraded scan** \u2014 could not reach ${degraded.join(", ")} this run, so findings are best-effort (e.g. exploited-status may be incomplete). Re-run to retry.`
     );
   }
+  const eolLines = renderRuntimeEol(results.map((r) => r.report));
+  if (eolLines.length > 0) lines.push("", ...eolLines);
   return lines.join("\n");
 }
 
@@ -25944,7 +26031,10 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     info("No added or bumped dependencies to report.");
     return;
   }
-  const policyResult = policy ? evaluatePolicy(results.flatMap(introducedFindings), policy) : { violations: [], fail: false, suppressed: [] };
+  const policyResult = policy ? evaluatePolicy(results.flatMap(introducedFindings), policy, {
+    // The runtime target is repo-level, so any report's EOL status speaks for the tree.
+    runtimeEol: results.map((r) => r.report.runtimeEol).find(Boolean)
+  }) : { violations: [], fail: false, suppressed: [] };
   await upsertComment(
     octokit,
     owner,

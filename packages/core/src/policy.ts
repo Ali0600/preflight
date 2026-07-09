@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import { licenseRisk } from './license';
 import { runtimeLabel } from './verdict';
-import type { Finding, RuntimeName } from './types';
+import type { Finding, RuntimeEol, RuntimeName } from './types';
 
 // A policy turns Preflight's signals into a configurable gate. It's the same engine the CLI
 // (`--policy`) and the Action (`policy-file`) share — so "what fails the build" lives in one place.
@@ -26,6 +26,9 @@ export interface Policy {
      * install on the target runtime; 'latest-dropped' also fails when the newest release
      * dropped it (the next auto-bump would break). */
     runtime?: 'incompatible' | 'latest-dropped';
+    /** Fail when the target runtime itself is past end-of-life (endoflife.date) — a
+     * report-level rule: no dependency bump fixes a dead interpreter. */
+    eolRuntime?: boolean;
   };
   /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
    * Shared config-file home for the CLI/Action (flags override). */
@@ -84,11 +87,18 @@ function licenseDenied(license: string, deny: string[]): boolean {
   });
 }
 
+/** Report-level facts a policy can gate on that don't belong to any single finding. */
+export interface PolicyContext {
+  runtimeEol?: RuntimeEol;
+}
+
 /** Evaluate a policy against findings → violations, whether the gate should fail, and the
- * findings an `allow` rule suppressed (announced, never silent). */
+ * findings an `allow` rule suppressed (announced, never silent). `context` carries
+ * report-level facts (runtime EOL) for the rules that gate on the project, not a dep. */
 export function evaluatePolicy(
   findings: Finding[],
   policy: Policy,
+  context: PolicyContext = {},
 ): { violations: Violation[]; fail: boolean; suppressed: Violation[] } {
   const rules = policy.failOn ?? {};
   const allowScripts = new Set(policy.allow?.installScripts ?? []);
@@ -163,6 +173,15 @@ export function evaluatePolicy(
         });
       }
     }
+  }
+  // Report-level rule: the interpreter itself, not any dependency.
+  if (rules.eolRuntime && context.runtimeEol?.isEol) {
+    const e = context.runtimeEol;
+    violations.push({
+      rule: 'eol-runtime',
+      dep: `${e.runtime} ${e.cycle}`,
+      detail: `runtime reached end-of-life${e.eol ? ` on ${e.eol}` : ''} — no security fixes`,
+    });
   }
   return { violations, fail: violations.length > 0, suppressed };
 }
