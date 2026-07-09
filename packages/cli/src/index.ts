@@ -86,6 +86,16 @@ function printFinding(f: Finding): void {
       : '';
     console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}${weak}`);
   }
+  // Build provenance (npm Sigstore / PyPI PEP 740) — only fetched under --health. Most packages
+  // ship none, so presence is the notable signal; "verified" is deps.dev's signature check.
+  if (f.provenance) {
+    const src = f.provenance.sourceRepository ? ` from ${f.provenance.sourceRepository}` : '';
+    console.log(
+      f.provenance.verified
+        ? `          ${pc.green(`🔏 verified build provenance${src}`)}`
+        : `          ${pc.dim(`🔏 build attestation present (unverified)${src}`)}`,
+    );
+  }
 }
 
 /** The transparency ledger: which data sources ran this scan and what each returned. Printed so a

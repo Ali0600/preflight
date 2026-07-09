@@ -63,7 +63,9 @@ no install, no account.
   as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro), the failure mode generic
   auto-updaters (Dependabot/Renovate) can't see — with the exact upgrade command to use instead.
 - **Severity + health enrichment** — maps GHSA labels and computes CVSS v3 base scores for
-  advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev.
+  advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev
+  **plus build provenance**: a 🔏 badge when the version ships a *verified* attestation (npm
+  Sigstore provenance / PyPI PEP 740) proving which repo and CI run actually built the artifact.
 - **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
   vector), names that look like **typosquats** of popular packages (fully offline), risky/unknown
   **licenses**, and weak **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
@@ -255,7 +257,7 @@ CI, or the dashboard) with zero configuration.
 | **OSV.dev** | Known vulnerabilities + malicious-package (`MAL-`) advisories → the `cve` / `malware` verdicts + severity | `api.osv.dev` |
 | **FIRST EPSS** | Exploit *probability* (0–1) per CVE — rank what's likely to actually be attacked | `api.first.org/data/v1/epss` |
 | **CISA KEV** | CVEs *confirmed* exploited in the wild — the "patch this now" list | `cisa.gov/.../known_exploited_vulnerabilities.json` |
-| **deps.dev** (v3) | OpenSSF Scorecard (project security health), behind `--health` | `api.deps.dev/v3` |
+| **deps.dev** (v3) | OpenSSF Scorecard + verified build provenance (npm Sigstore / PyPI PEP 740) + detected SPDX license, behind `--health` | `api.deps.dev/v3` |
 | **npm registry** | Latest version + last-publish date + per-version deprecation → the `stale` / `deprecated` verdicts | `registry.npmjs.org` |
 | **PyPI** (JSON) | Latest version + upload time + yanked releases, for pip manifests | `pypi.org/pypi/{name}/json` |
 | **endoflife.date** | End-of-life date of the *target runtime* (Node/Python) — flags a dead interpreter no dependency bump can fix | `endoflife.date/api/{product}.json` |

@@ -164,6 +164,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       health: health?.score,
       healthChecks: health?.checks?.filter((c) => c.score < 7), // surface only the weak spots
       installScript: d.installScript,
+      provenance: health?.provenance,
       // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
       suspiciousName: direct ? typosquatHit(d.name, ecosystem) : undefined,
       runtimeCompat: runtimeMeta
@@ -288,18 +289,19 @@ function describeSources(args: {
         },
   );
 
-  // OpenSSF Scorecard — only under --health.
+  // OpenSSF Scorecard + build provenance — only under --health (one GetVersion call covers both).
+  const attested = findings.filter((f) => f.provenance?.verified).length;
   sources.push(
     opts.health
       ? {
-          name: 'deps.dev (OpenSSF Scorecard)',
+          name: 'deps.dev (Scorecard · provenance)',
           status: down('deps.dev') ? 'degraded' : 'ok',
           detail: down('deps.dev')
-            ? 'unreachable — health scores may be missing'
-            : `health score for ${findings.filter((f) => f.health !== undefined).length} dep(s)`,
+            ? 'unreachable — health scores/provenance may be missing'
+            : `health score for ${findings.filter((f) => f.health !== undefined).length} dep(s)${attested ? ` · ${attested} with verified build provenance` : ''}`,
         }
       : {
-          name: 'deps.dev (OpenSSF Scorecard)',
+          name: 'deps.dev (Scorecard · provenance)',
           status: 'skipped',
           detail: 'not run — enable with --health / a min-health policy',
         },
@@ -382,7 +384,7 @@ async function fetchHealthAll(
       .filter((d) => d.version)
       .map(async (d) => {
         const health = await fetchHealth(d.name, d.version!, ecosystem, onDegraded);
-        if (health.score !== undefined || health.checks?.length || health.license) {
+        if (health.score !== undefined || health.checks?.length || health.license || health.provenance) {
           out.set(d.name, health);
         }
       }),

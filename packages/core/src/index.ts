@@ -2,7 +2,7 @@ export * from './types';
 export { parseManifest, parseManifestContent } from './manifest';
 export { fetchVulns } from './osv';
 export { fetchRegistry, fetchRegistryAll, type RegistryInfo } from './registry';
-export { fetchHealth, type HealthInfo } from './depsdev';
+export { fetchHealth, type HealthInfo, type ProvenanceInfo } from './depsdev';
 export { fetchEpss, type EpssScore } from './epss';
 export { fetchKev } from './kev';
 export { typosquatOf } from './typosquat';

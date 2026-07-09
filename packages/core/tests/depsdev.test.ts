@@ -54,3 +54,70 @@ describe('fetchHealth', () => {
     ]);
   });
 });
+
+describe('fetchHealth — provenance + license (same GetVersion call)', () => {
+  it('summarizes verified attestations and detected SPDX licenses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/versions/')) {
+          return new Response(
+            JSON.stringify({
+              licenses: ['Apache-2.0'],
+              // Shape verified live: sigstore@5.0.0 (npm) / pypi-attestations (PEP 740)
+              slsaProvenances: [
+                { sourceRepository: 'https://github.com/sigstore/sigstore-js', verified: true },
+              ],
+              attestations: [
+                { type: 'https://slsa.dev/provenance/v1', verified: true, sourceRepository: 'https://github.com/sigstore/sigstore-js' },
+              ],
+              relatedProjects: [],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response('nope', { status: 404 });
+      }),
+    );
+    const h = await fetchHealth('sigstore', '5.0.0', 'npm');
+    expect(h.provenance).toEqual({
+      verified: true,
+      sourceRepository: 'https://github.com/sigstore/sigstore-js',
+    });
+    expect(h.license).toBe('Apache-2.0');
+    expect(h.score).toBeUndefined(); // no linked project — provenance/license still returned
+  });
+
+  it('reports an unverified attestation as present but not verified', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/versions/')) {
+          return new Response(
+            JSON.stringify({ attestations: [{ verified: false }], relatedProjects: [] }),
+            { status: 200 },
+          );
+        }
+        return new Response('nope', { status: 404 });
+      }),
+    );
+    const h = await fetchHealth('pkg', '1.0.0', 'npm');
+    expect(h.provenance?.verified).toBe(false);
+  });
+
+  it('returns no provenance when the version ships none (empty arrays)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/versions/')) {
+          return new Response(
+            JSON.stringify({ slsaProvenances: [], attestations: [], relatedProjects: [] }),
+            { status: 200 },
+          );
+        }
+        return new Response('nope', { status: 404 });
+      }),
+    );
+    expect((await fetchHealth('left-pad', '1.3.0', 'npm')).provenance).toBeUndefined();
+  });
+});

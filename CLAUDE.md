@@ -38,7 +38,9 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     version→message: npm `deprecated`, or a PyPI release whose files are ALL yanked — a partial yank
     stays live; empty-string `deprecated` = un-deprecated, not a signal) (npm/PyPI; under `--latest`)
   - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`);
-    also returns the detected SPDX `license` from the same GetVersion call (fills registry gaps)
+    the same GetVersion call also yields the detected SPDX `license` (fills registry gaps) and
+    `provenance` (npm Sigstore + PyPI PEP 740 attestations both land in `attestations[]`,
+    `verified` = deps.dev's signature check — display-only, no gate; shapes verified live 2026-07-09)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `combos.ts` — known-bad version *pairs* (break together despite peer ranges admitting each
     other, e.g. eslint 10 × eslint-config-next ≤16 — #31). `plan` holds the subject back to the

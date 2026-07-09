@@ -17,6 +17,18 @@ interface VersionResponse {
   /** SPDX 2.1 expressions, e.g. ["MIT"] — deps.dev detects these from the artifact, so they
    * fill gaps the registry's self-declared `license` field leaves (missing/free-text). */
   licenses?: string[];
+  /** Build/publish attestations deps.dev found and checked for this version: npm Sigstore
+   * provenance AND PyPI PEP 740 publish attestations both land here (shapes verified live). */
+  attestations?: { type?: string; verified?: boolean; sourceRepository?: string }[];
+  slsaProvenances?: { verified?: boolean; sourceRepository?: string }[];
+}
+
+/** Build-provenance summary for a package version (from deps.dev, which verifies the
+ * signatures). `verified` = at least one attestation checked out; `sourceRepository` = the
+ * repo the artifact was provably built from. */
+export interface ProvenanceInfo {
+  verified: boolean;
+  sourceRepository?: string;
 }
 
 export interface HealthInfo {
@@ -26,6 +38,8 @@ export interface HealthInfo {
   checks?: { name: string; score: number }[];
   /** deps.dev's detected SPDX license expression — a fallback when the registry declares none. */
   license?: string;
+  /** Present when the version ships a build/publish attestation (npm provenance / PEP 740). */
+  provenance?: ProvenanceInfo;
 }
 
 // The Scorecard checks that speak to supply-chain risk (the catalog has ~18; these are the ones
@@ -40,6 +54,19 @@ const SECURITY_CHECKS = new Set([
   'Signed-Releases',
   'Vulnerabilities',
 ]);
+
+/** Fold the version's attestations/slsaProvenances into one summary (absent = none shipped).
+ * npm Sigstore provenance and PyPI PEP 740 publish attestations both appear in these arrays;
+ * `verified` is deps.dev's own signature check, not our claim. */
+function readProvenance(ver: VersionResponse): ProvenanceInfo | undefined {
+  const all = [...(ver.attestations ?? []), ...(ver.slsaProvenances ?? [])];
+  if (all.length === 0) return undefined;
+  const verified = all.filter((a) => a.verified === true);
+  return {
+    verified: verified.length > 0,
+    sourceRepository: (verified[0] ?? all[0]).sourceRepository,
+  };
+}
 
 /** OpenSSF Scorecard (overall + per-check) for the source repo backing a package version.
  * A 404 (or no linked source repo) is a legitimate "no scorecard" ({} cached); any other failure
@@ -60,14 +87,15 @@ export async function fetchHealth(
       if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = (await verRes.json()) as VersionResponse;
       const license = ver.licenses?.filter((l) => l && l !== 'non-standard').join(' AND ') || undefined;
+      const provenance = readProvenance(ver);
       const related = ver.relatedProjects ?? [];
       const projectId = (
         related.find((p) => p.relationType === 'SOURCE_REPO') ?? related[0]
       )?.projectKey?.id;
-      if (!projectId) return { license };
+      if (!projectId) return { license, provenance };
 
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (projRes.status === 404) return { license };
+      if (projRes.status === 404) return { license, provenance };
       if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = (await projRes.json()) as {
         scorecard?: { overallScore?: number; checks?: { name?: string; score?: number }[] };
@@ -75,7 +103,7 @@ export async function fetchHealth(
       const checks = (proj.scorecard?.checks ?? [])
         .filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0)
         .map((c) => ({ name: c.name!, score: c.score! }));
-      return { score: proj.scorecard?.overallScore, checks, license };
+      return { score: proj.scorecard?.overallScore, checks, license, provenance };
     });
   } catch (err) {
     warn(`deps.dev lookup failed for ${name}@${version}: ${(err as Error).message}`);
