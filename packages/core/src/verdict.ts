@@ -89,6 +89,15 @@ export function decideVerdict(f: Omit<Finding, 'verdict' | 'reason'>): {
   if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
     return { verdict: 'incompatible', reason: incompatibleReason(f, f.runtimeCompat) };
   }
+  // The maintainer explicitly said "stop using this" (npm deprecation / PyPI yank) — that
+  // outranks lockstep/staleness advice but not an actual vulnerability or install failure.
+  if (f.deprecated) {
+    const msg = f.deprecated.length > 120 ? `${f.deprecated.slice(0, 117)}…` : f.deprecated;
+    const tail = f.lockstep.pinned
+      ? ` · framework-pinned (${f.lockstep.framework}) — fix via ${f.lockstep.tool}`
+      : '';
+    return { verdict: 'deprecated', reason: `Deprecated upstream: ${msg}${tail}` };
+  }
   if (f.lockstep.pinned) {
     return {
       verdict: 'pinned',

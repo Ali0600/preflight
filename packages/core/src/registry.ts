@@ -9,6 +9,19 @@ export interface RegistryInfo {
   lastPublish?: string;
   /** Declared license id, e.g. "MIT" / "GPL-3.0" (npm `license` / PyPI classifier). */
   license?: string;
+  /** Sparse map of version -> upstream deprecation notice: npm's per-version `deprecated`
+   * message, or "yanked from PyPI" for a release whose files are all yanked. Only versions
+   * that ARE deprecated appear (most packages contribute nothing, so the cache stays small). */
+  deprecated?: Record<string, string>;
+}
+
+/** npm's `deprecated` is a message string; a bare `true` appears in some old docs. An empty
+ * string means "un-deprecated" (npm CLI ignores it too) — a false "deprecated" verdict is bad
+ * advice, so only a real signal counts. */
+function npmDeprecation(dep: unknown): string | undefined {
+  if (dep === true) return 'deprecated upstream (no message given)';
+  if (typeof dep === 'string' && dep.trim() !== '') return dep.trim();
+  return undefined;
 }
 
 /** Pull a short license id from a PyPI `License :: OSI Approved :: X License` classifier. */
@@ -37,9 +50,20 @@ export async function fetchRegistry(
           'dist-tags'?: { latest?: string };
           time?: { modified?: string };
           license?: string | { type?: string };
+          versions?: Record<string, { deprecated?: unknown }>;
         };
         const license = typeof j.license === 'string' ? j.license : j.license?.type;
-        return { latest: j['dist-tags']?.latest, lastPublish: j.time?.modified, license };
+        const deprecated: Record<string, string> = {};
+        for (const [v, meta] of Object.entries(j.versions ?? {})) {
+          const msg = npmDeprecation(meta.deprecated);
+          if (msg) deprecated[v] = msg;
+        }
+        return {
+          latest: j['dist-tags']?.latest,
+          lastPublish: j.time?.modified,
+          license,
+          deprecated: Object.keys(deprecated).length ? deprecated : undefined,
+        };
       }
       const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
       if (r.status === 404) return {};
@@ -47,13 +71,29 @@ export async function fetchRegistry(
       const j = (await r.json()) as {
         info?: { version?: string; license?: string; classifiers?: string[] };
         urls?: { upload_time_iso_8601?: string }[];
-        releases?: Record<string, { upload_time_iso_8601?: string }[]>;
+        releases?: Record<
+          string,
+          { upload_time_iso_8601?: string; yanked?: boolean; yanked_reason?: string | null }[]
+        >;
       };
       const latest = j.info?.version;
       const lastPublish =
         j.urls?.[0]?.upload_time_iso_8601 ??
         (latest ? j.releases?.[latest]?.[0]?.upload_time_iso_8601 : undefined);
-      return { latest, lastPublish, license: pypiLicense(j.info) };
+      // PyPI has no "deprecated" concept — yanking (PEP 592) is its "stop using this" signal.
+      // A release counts only when EVERY file is yanked (a partial yank targets one bad wheel).
+      const deprecated: Record<string, string> = {};
+      for (const [v, files] of Object.entries(j.releases ?? {})) {
+        if (files.length === 0 || !files.every((f) => f.yanked)) continue;
+        const reason = files.find((f) => f.yanked_reason)?.yanked_reason;
+        deprecated[v] = reason ? `yanked from PyPI: ${reason}` : 'yanked from PyPI';
+      }
+      return {
+        latest,
+        lastPublish,
+        license: pypiLicense(j.info),
+        deprecated: Object.keys(deprecated).length ? deprecated : undefined,
+      };
     });
   } catch (err) {
     warn(`registry lookup failed for ${name}: ${(err as Error).message}`);

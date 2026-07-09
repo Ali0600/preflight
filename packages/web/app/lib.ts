@@ -20,6 +20,7 @@ export const VERDICT_META: Record<Verdict, { label: string; icon: string }> = {
   malware: { label: 'Malware', icon: 'ti-biohazard' },
   cve: { label: 'CVE', icon: 'ti-alert-triangle' },
   incompatible: { label: 'Incompatible', icon: 'ti-plug-off' },
+  deprecated: { label: 'Deprecated', icon: 'ti-archive' },
   pinned: { label: 'Pinned', icon: 'ti-lock' },
   stale: { label: 'Stale', icon: 'ti-clock' },
   safe: { label: 'Safe', icon: 'ti-circle-check' },
@@ -73,6 +74,10 @@ export function insight(report: Report): string {
   if (summary.incompatible > 0)
     parts.push(
       `${summary.incompatible} cannot install on ${report.runtimeTarget ? `${report.runtimeTarget.runtime === 'node' ? 'Node' : 'Python'} ${report.runtimeTarget.version}` : 'the target runtime'}`,
+    );
+  if (summary.deprecated > 0)
+    parts.push(
+      `${summary.deprecated} deprecated upstream — the maintainer says stop using ${summary.deprecated === 1 ? 'it' : 'them'}`,
     );
   if (summary.pinned > 0)
     parts.push(`${summary.pinned} framework-pinned — bump via the framework's tool, not per-package`);

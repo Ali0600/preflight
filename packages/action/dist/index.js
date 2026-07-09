@@ -23904,14 +23904,16 @@ var VERDICT_ORDER = {
   malware: 0,
   cve: 1,
   incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5
+  deprecated: 3,
+  pinned: 4,
+  stale: 5,
+  safe: 6
 };
 var VERDICT_LABEL = {
   malware: "MALWARE",
   cve: "CVE",
   incompatible: "INCOMPAT",
+  deprecated: "DEPRECATED",
   pinned: "PINNED",
   stale: "STALE",
   safe: "SAFE"
@@ -24159,6 +24161,11 @@ async function fetchVulns(deps, ecosystem, onDegraded) {
 }
 
 // ../core/src/registry.ts
+function npmDeprecation(dep) {
+  if (dep === true) return "deprecated upstream (no message given)";
+  if (typeof dep === "string" && dep.trim() !== "") return dep.trim();
+  return void 0;
+}
 function pypiLicense(info2) {
   const cls = (info2?.classifiers ?? []).find((c) => c.startsWith("License ::"));
   if (cls) return cls.split("::").pop()?.replace(/License$/i, "").trim() || cls;
@@ -24174,7 +24181,17 @@ async function fetchRegistry(name, ecosystem, onDegraded) {
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         const j2 = await r2.json();
         const license = typeof j2.license === "string" ? j2.license : j2.license?.type;
-        return { latest: j2["dist-tags"]?.latest, lastPublish: j2.time?.modified, license };
+        const deprecated2 = {};
+        for (const [v, meta] of Object.entries(j2.versions ?? {})) {
+          const msg = npmDeprecation(meta.deprecated);
+          if (msg) deprecated2[v] = msg;
+        }
+        return {
+          latest: j2["dist-tags"]?.latest,
+          lastPublish: j2.time?.modified,
+          license,
+          deprecated: Object.keys(deprecated2).length ? deprecated2 : void 0
+        };
       }
       const r = await fetch(`https://pypi.org/pypi/${encodeURIComponent(name)}/json`);
       if (r.status === 404) return {};
@@ -24182,7 +24199,18 @@ async function fetchRegistry(name, ecosystem, onDegraded) {
       const j = await r.json();
       const latest = j.info?.version;
       const lastPublish = j.urls?.[0]?.upload_time_iso_8601 ?? (latest ? j.releases?.[latest]?.[0]?.upload_time_iso_8601 : void 0);
-      return { latest, lastPublish, license: pypiLicense(j.info) };
+      const deprecated = {};
+      for (const [v, files] of Object.entries(j.releases ?? {})) {
+        if (files.length === 0 || !files.every((f) => f.yanked)) continue;
+        const reason = files.find((f) => f.yanked_reason)?.yanked_reason;
+        deprecated[v] = reason ? `yanked from PyPI: ${reason}` : "yanked from PyPI";
+      }
+      return {
+        latest,
+        lastPublish,
+        license: pypiLicense(j.info),
+        deprecated: Object.keys(deprecated).length ? deprecated : void 0
+      };
     });
   } catch (err) {
     warn(`registry lookup failed for ${name}: ${err.message}`);
@@ -24225,15 +24253,16 @@ async function fetchHealth(name, version, ecosystem, onDegraded) {
       if (verRes.status === 404) return {};
       if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = await verRes.json();
+      const license = ver.licenses?.filter((l) => l && l !== "non-standard").join(" AND ") || void 0;
       const related = ver.relatedProjects ?? [];
       const projectId = (related.find((p) => p.relationType === "SOURCE_REPO") ?? related[0])?.projectKey?.id;
-      if (!projectId) return {};
+      if (!projectId) return { license };
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (projRes.status === 404) return {};
+      if (projRes.status === 404) return { license };
       if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = await projRes.json();
       const checks = (proj.scorecard?.checks ?? []).filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0).map((c) => ({ name: c.name, score: c.score }));
-      return { score: proj.scorecard?.overallScore, checks };
+      return { score: proj.scorecard?.overallScore, checks, license };
     });
   } catch (err) {
     warn(`deps.dev lookup failed for ${name}@${version}: ${err.message}`);
@@ -24590,6 +24619,11 @@ function decideVerdict(f) {
   if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
     return { verdict: "incompatible", reason: incompatibleReason(f, f.runtimeCompat) };
   }
+  if (f.deprecated) {
+    const msg = f.deprecated.length > 120 ? `${f.deprecated.slice(0, 117)}\u2026` : f.deprecated;
+    const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
+    return { verdict: "deprecated", reason: `Deprecated upstream: ${msg}${tail}` };
+  }
   if (f.lockstep.pinned) {
     return {
       verdict: "pinned",
@@ -24675,6 +24709,9 @@ function evaluatePolicy(findings, policy) {
     if (rules.suspiciousName && f.suspiciousName) {
       violations.push({ rule: "suspicious-name", dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
     }
+    if (rules.deprecated && f.deprecated) {
+      violations.push({ rule: "deprecated", dep: at, detail: f.deprecated });
+    }
     if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
       violations.push({ rule: "license", dep: at, detail: f.license });
     }
@@ -24700,7 +24737,8 @@ function evaluatePolicy(findings, policy) {
 function policyNeeds(policy) {
   const r = policy.failOn ?? {};
   return {
-    latest: Boolean(r.license),
+    // License AND deprecation data both ride the registry (--latest) fetch.
+    latest: Boolean(r.license) || Boolean(r.deprecated),
     health: r.minHealth !== void 0,
     runtime: r.runtime !== void 0
   };
@@ -25380,7 +25418,10 @@ async function analyzeManifest(manifest, opts = {}) {
       lockstep: lockstepFor(d.name, frameworks),
       latest: info2?.latest,
       lastPublish: info2?.lastPublish,
-      license: info2?.license,
+      // Registry self-declared license first; deps.dev's detected SPDX (under --health) fills gaps.
+      license: info2?.license ?? health?.license,
+      // Upstream deprecation notice for the *resolved* version (npm `deprecated` / PyPI yank).
+      deprecated: d.version ? info2?.deprecated?.[d.version] : void 0,
       health: health?.score,
       healthChecks: health?.checks?.filter((c) => c.score < 7),
       // surface only the weak spots
@@ -25396,6 +25437,7 @@ async function analyzeManifest(manifest, opts = {}) {
     malware: 0,
     cve: 0,
     incompatible: 0,
+    deprecated: 0,
     pinned: 0,
     stale: 0,
     safe: 0
@@ -25456,15 +25498,16 @@ function describeSources(args) {
       detail: "not needed \u2014 no CVEs to prioritize"
     });
   }
+  const deprecatedCount = findings.filter((f) => f.deprecated).length;
   sources.push(
     opts.latest ? {
-      name: `${registry} (freshness + license)`,
+      name: `${registry} (freshness \xB7 license \xB7 deprecation)`,
       status: down(registry) ? "degraded" : "ok",
-      detail: down(registry) ? "unreachable \u2014 latest versions/licenses may be missing" : `latest version + license for ${directCount} direct dep(s)`
+      detail: down(registry) ? "unreachable \u2014 latest versions/licenses/deprecations may be missing" : `latest version, license + deprecation for ${directCount} direct dep(s)${deprecatedCount ? ` \u2192 ${deprecatedCount} deprecated` : ""}`
     } : {
-      name: `${registry} (freshness + license)`,
+      name: `${registry} (freshness \xB7 license \xB7 deprecation)`,
       status: "skipped",
-      detail: "not run \u2014 enable with --latest / a license policy"
+      detail: "not run \u2014 enable with --latest / a license or deprecated policy"
     }
   );
   sources.push(
@@ -25510,7 +25553,9 @@ async function fetchHealthAll(deps, ecosystem, onDegraded) {
   await Promise.all(
     deps.filter((d) => d.version).map(async (d) => {
       const health = await fetchHealth(d.name, d.version, ecosystem, onDegraded);
-      if (health.score !== void 0 || health.checks?.length) out.set(d.name, health);
+      if (health.score !== void 0 || health.checks?.length || health.license) {
+        out.set(d.name, health);
+      }
     })
   );
   return out;
@@ -25566,6 +25611,7 @@ var EMOJI = {
   malware: "\u2623\uFE0F",
   cve: "\u{1F7E5}",
   incompatible: "\u26D4",
+  deprecated: "\u{1FAA6}",
   pinned: "\u{1F7E8}",
   stale: "\u{1F7EA}",
   safe: "\u{1F7E9}"

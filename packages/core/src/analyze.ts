@@ -153,7 +153,10 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       lockstep: lockstepFor(d.name, frameworks),
       latest: info?.latest,
       lastPublish: info?.lastPublish,
-      license: info?.license,
+      // Registry self-declared license first; deps.dev's detected SPDX (under --health) fills gaps.
+      license: info?.license ?? health?.license,
+      // Upstream deprecation notice for the *resolved* version (npm `deprecated` / PyPI yank).
+      deprecated: d.version ? info?.deprecated?.[d.version] : undefined,
       health: health?.score,
       healthChecks: health?.checks?.filter((c) => c.score < 7), // surface only the weak spots
       installScript: d.installScript,
@@ -171,6 +174,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     malware: 0,
     cve: 0,
     incompatible: 0,
+    deprecated: 0,
     pinned: 0,
     stale: 0,
     safe: 0,
@@ -259,20 +263,21 @@ function describeSources(args: {
     });
   }
 
-  // Registry freshness + license — only under --latest (or a license policy).
+  // Registry freshness + license + deprecation — only under --latest (or a license/deprecated policy).
+  const deprecatedCount = findings.filter((f) => f.deprecated).length;
   sources.push(
     opts.latest
       ? {
-          name: `${registry} (freshness + license)`,
+          name: `${registry} (freshness · license · deprecation)`,
           status: down(registry) ? 'degraded' : 'ok',
           detail: down(registry)
-            ? 'unreachable — latest versions/licenses may be missing'
-            : `latest version + license for ${directCount} direct dep(s)`,
+            ? 'unreachable — latest versions/licenses/deprecations may be missing'
+            : `latest version, license + deprecation for ${directCount} direct dep(s)${deprecatedCount ? ` → ${deprecatedCount} deprecated` : ''}`,
         }
       : {
-          name: `${registry} (freshness + license)`,
+          name: `${registry} (freshness · license · deprecation)`,
           status: 'skipped',
-          detail: 'not run — enable with --latest / a license policy',
+          detail: 'not run — enable with --latest / a license or deprecated policy',
         },
   );
 
@@ -344,7 +349,9 @@ async function fetchHealthAll(
       .filter((d) => d.version)
       .map(async (d) => {
         const health = await fetchHealth(d.name, d.version!, ecosystem, onDegraded);
-        if (health.score !== undefined || health.checks?.length) out.set(d.name, health);
+        if (health.score !== undefined || health.checks?.length || health.license) {
+          out.set(d.name, health);
+        }
       }),
   );
   return out;

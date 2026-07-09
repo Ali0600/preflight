@@ -67,6 +67,10 @@ no install, no account.
 - **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
   vector), names that look like **typosquats** of popular packages (fully offline), risky/unknown
   **licenses**, and weak **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
+- **Deprecation surfacing** — under `--latest`, a dependency whose resolved version the maintainer
+  deprecated (npm's `deprecated` notice) or **yanked from PyPI** gets its own `deprecated` verdict,
+  with the upstream message repeated verbatim — the "stop using this" signal `npm install` prints
+  once and CI never sees. Opt-in gate via `failOn: { "deprecated": true }`.
 - **Runtime-compatibility check** — declare the runtime the project actually runs on
   (`--python 3.9` / `--node 18`, a `runtimes` key in the config, or auto-detected from
   `.python-version`/`.nvmrc`) and Preflight flags dependencies whose range **cannot install
@@ -203,6 +207,8 @@ evaluated by `@preflight/core`:
   or `"severity:medium"` (worst rated severity at/above the floor; unrated advisories count as
   low, and a KEV'd advisory fails **any** floor — confirmed exploitation beats a severity label).
 - `installScript` / `suspiciousName` — fail on a dep that runs an install script / has a typosquat-like name.
+- `deprecated` — fail when a resolved version is deprecated upstream (npm `deprecated` / fully
+  yanked from PyPI).
 - `license` — fail on these license ids, or the buckets `"copyleft"` / `"unknown"`.
 - `minHealth` — fail if a *direct* dep's OpenSSF score is below this.
 - `runtime` — `"incompatible"` fails when a dep's range cannot install on the target runtime
@@ -219,7 +225,8 @@ evaluated by `@preflight/core`:
   rot invisibly. Malware is never suppressible.
 
 Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
-need (`license` → latest version, `minHealth` → health), so you don't have to remember the flags.
+need (`license`/`deprecated` → latest version, `minHealth` → health), so you don't have to remember
+the flags.
 
 **Where the file lives:** the CLI resolves `preflight.config.json` relative to the directory you
 run it *from* (pass `--policy path/to/file.json` for anything else); the Action's `policy-file:`

@@ -2,7 +2,8 @@
   "failOn": {
     "vuln": "cve",
     "installScript": true,
-    "suspiciousName": true
+    "suspiciousName": true,
+    "deprecated": true
   },
   "allow": {
     "installScripts": ["esbuild", "fsevents", "sharp"]

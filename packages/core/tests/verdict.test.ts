@@ -246,3 +246,41 @@ describe('decideVerdict — precedence holds under combined signals (malware > c
     expect(r.verdict).toBe('cve');
   });
 });
+
+describe('decideVerdict — deprecated', () => {
+  const dep = {
+    name: 'request',
+    range: '^2.88',
+    version: '2.88.2',
+    dev: false,
+    vulns: [] as Vuln[],
+    lockstep: { pinned: false },
+    deprecated: 'request has been deprecated',
+  };
+
+  it('a deprecated dep with nothing worse -> deprecated, reason carries the upstream message', () => {
+    const r = decideVerdict(dep);
+    expect(r.verdict).toBe('deprecated');
+    expect(r.reason).toContain('request has been deprecated');
+  });
+
+  it('deprecated + CVE -> cve (the vulnerability outranks the notice)', () => {
+    const r = decideVerdict({ ...dep, vulns: med });
+    expect(r.verdict).toBe('cve');
+  });
+
+  it('deprecated + framework-pinned -> deprecated, with the framework fix in the tail', () => {
+    const r = decideVerdict({
+      ...dep,
+      lockstep: { pinned: true, framework: 'Expo', tool: 'npx expo install' },
+    });
+    expect(r.verdict).toBe('deprecated');
+    expect(r.reason).toContain('npx expo install');
+  });
+
+  it('truncates a very long deprecation message', () => {
+    const r = decideVerdict({ ...dep, deprecated: 'x'.repeat(500) });
+    expect(r.reason.length).toBeLessThan(200);
+    expect(r.reason).toContain('…');
+  });
+});
