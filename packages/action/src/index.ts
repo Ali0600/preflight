@@ -40,7 +40,8 @@ import {
 const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
 // A lockfile-only change still moves the installed tree (transitive adds/bumps) —
 // it must trigger the scan of its sibling manifest too (dogfood BUG-3/#20).
-const LOCKFILE = /(^|\/)package-lock\.json$/i;
+const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
+const LOCKFILE_NAMES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] as const;
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
@@ -313,8 +314,14 @@ async function fetchBaseTree(
   const dir = mkdtempSync(join(tmpdir(), 'preflight-base-'));
   try {
     writeFileSync(join(dir, 'package.json'), manifest);
-    const lock = await fetchBaseFile(octokit, owner, repo, join(dirname(path), 'package-lock.json'), ref);
-    if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
+    // Fetch whichever lockfile the base tree has (npm, pnpm, or yarn) so its graph enumerates.
+    for (const name of LOCKFILE_NAMES) {
+      const lock = await fetchBaseFile(octokit, owner, repo, join(dirname(path), name), ref);
+      if (lock !== undefined) {
+        writeFileSync(join(dir, name), lock);
+        break;
+      }
+    }
     return parseManifest(join(dir, 'package.json')).dependencies;
   } catch (err) {
     // e.g. an unparsable base lockfile — fall back to the declared deps so the diff degrades

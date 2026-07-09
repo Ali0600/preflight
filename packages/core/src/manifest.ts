@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
+import { enumeratePnpmGraph, enumerateYarnGraph } from './lockfiles';
 import type { Dependency, Ecosystem, Manifest } from './types';
 
 /** Pick the parser for a manifest filename, or throw if it isn't one we support. */
@@ -24,14 +25,26 @@ export function parseManifestContent(filename: string, content: string): Manifes
   return { ecosystem, path: filename, dependencies, lockfile: ecosystem === 'npm' ? false : undefined };
 }
 
+/** Lockfiles we can expand into the full installed graph, in precedence order (a repo that
+ * somehow carries several gets the npm one — it has the richest metadata: dev flags per node
+ * + hasInstallScript). */
+const NPM_LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] as const;
+
 /** Parse an npm (package.json) or pip (requirements.txt) manifest file into a flat dep list. */
 export function parseManifest(path: string): Manifest {
   ecosystemFor(basename(path)); // reject unsupported types before touching the filesystem
   const manifest = parseManifestContent(path, readFileSync(path, 'utf8'));
   if (manifest.ecosystem === 'npm') {
-    const lock = join(dirname(path), 'package-lock.json');
-    manifest.lockfile = existsSync(lock);
-    if (manifest.lockfile) manifest.dependencies = enumerateNpmGraph(lock, manifest.dependencies);
+    const dir = dirname(path);
+    const lock = NPM_LOCKFILES.map((f) => join(dir, f)).find(existsSync);
+    manifest.lockfile = lock !== undefined;
+    if (lock !== undefined) {
+      manifest.dependencies = lock.endsWith('package-lock.json')
+        ? enumerateNpmGraph(lock, manifest.dependencies)
+        : lock.endsWith('pnpm-lock.yaml')
+          ? enumeratePnpmGraph(readFileSync(lock, 'utf8'), manifest.dependencies)
+          : enumerateYarnGraph(readFileSync(lock, 'utf8'), manifest.dependencies);
+    }
   }
   return manifest;
 }

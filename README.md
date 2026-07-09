@@ -53,7 +53,8 @@ no install, no account.
 
 > **Python note:** pip has no standard lockfile, so a `requirements.txt` scan covers exactly the
 > versions listed in it. For transitive coverage, scan a fully-pinned file (`pip freeze` or
-> pip-tools' `requirements.txt` output). npm scans always include the full `package-lock.json` tree.
+> pip-tools' `requirements.txt` output). JavaScript scans always include the full lockfile tree —
+> **`package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`** (classic v1 and berry) are all parsed.
 
 ## Highlights
 - **Supply-chain pre-flight engine** — parses npm/pip manifests, batches queries to the OSV

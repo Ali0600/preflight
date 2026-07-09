@@ -23,7 +23,13 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
     each `Finding`/`Dependency` tagged `direct`) / requirements.txt. OSV scans the whole graph;
-    `--latest`/`--health` apply to direct deps only.
+    `--latest`/`--health` apply to direct deps only. Lockfile discovery order:
+    package-lock.json → pnpm-lock.yaml → yarn.lock (npm's has the richest metadata).
+  - `lockfiles.ts` — pnpm (v5/v6/v9) + yarn (classic v1 + berry) graph parsers (`yaml` dep,
+    bundled by tsup). Scope: transitive deps get `dev: false` (reconstructing dev-only
+    reachability needs a graph walk — conservative, scans MORE); `installScript` only where the
+    format exposes it (pnpm v5/v6 `requiresBuild`), never fabricated. Action PR-mode triggers on
+    all three lockfile names and fetches whichever the base tree has.
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as malicious)
   - `cvss.ts` — CVSS v3 base-score → severity (fallback when OSV has no GHSA label)
   - `epss.ts` — FIRST EPSS exploit-probability per CVE (keyless, batched); `kev.ts` — CISA KEV set
