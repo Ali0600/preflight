@@ -13,6 +13,9 @@ export interface Policy {
     vuln?: string;
     /** Fail if a dependency runs an install script. */
     installScript?: boolean;
+    /** Fail if the resolved version is deprecated upstream (npm `deprecated` / PyPI yank).
+     * Needs registry data — enabling this turns on the `--latest` fetch, like `license`. */
+    deprecated?: boolean;
     /** Fail if a dependency's name looks like a typosquat of a popular package. */
     suspiciousName?: boolean;
     /** Fail on these license ids, or the buckets "copyleft" / "unknown". */
@@ -133,6 +136,9 @@ export function evaluatePolicy(
     if (rules.suspiciousName && f.suspiciousName) {
       violations.push({ rule: 'suspicious-name', dep: at, detail: `resembles ${f.suspiciousName.similarTo}` });
     }
+    if (rules.deprecated && f.deprecated) {
+      violations.push({ rule: 'deprecated', dep: at, detail: f.deprecated });
+    }
     if (rules.license && f.license && licenseDenied(f.license, rules.license)) {
       violations.push({ rule: 'license', dep: at, detail: f.license });
     }
@@ -165,7 +171,8 @@ export function evaluatePolicy(
 export function policyNeeds(policy: Policy): { latest: boolean; health: boolean; runtime: boolean } {
   const r = policy.failOn ?? {};
   return {
-    latest: Boolean(r.license),
+    // License AND deprecation data both ride the registry (--latest) fetch.
+    latest: Boolean(r.license) || Boolean(r.deprecated),
     health: r.minHealth !== undefined,
     runtime: r.runtime !== undefined,
   };

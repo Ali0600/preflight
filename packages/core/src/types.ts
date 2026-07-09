@@ -5,7 +5,7 @@ export type Ecosystem = 'npm' | 'PyPI';
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
-export type Verdict = 'malware' | 'cve' | 'incompatible' | 'pinned' | 'stale' | 'safe';
+export type Verdict = 'malware' | 'cve' | 'incompatible' | 'deprecated' | 'pinned' | 'stale' | 'safe';
 
 /** Worst-first sort rank for verdicts — shared by every surface so tables/lists agree.
  * Lives here (types.ts has zero imports) so the web CLIENT bundle can import it via the
@@ -14,9 +14,10 @@ export const VERDICT_ORDER: Record<Verdict, number> = {
   malware: 0,
   cve: 1,
   incompatible: 2,
-  pinned: 3,
-  stale: 4,
-  safe: 5,
+  deprecated: 3,
+  pinned: 4,
+  stale: 5,
+  safe: 6,
 };
 
 /** Console-style badge label per verdict (CLI + Action). The web picks its own display text. */
@@ -24,6 +25,7 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
   malware: 'MALWARE',
   cve: 'CVE',
   incompatible: 'INCOMPAT',
+  deprecated: 'DEPRECATED',
   pinned: 'PINNED',
   stale: 'STALE',
   safe: 'SAFE',
@@ -126,6 +128,10 @@ export interface Finding {
   installScript?: boolean;
   /** SPDX-ish license id (e.g. "MIT", "GPL-3.0"), when `--latest` is requested. */
   license?: string;
+  /** Upstream deprecation notice for the resolved version (npm `deprecated` message /
+   * PyPI fully-yanked release), when `--latest` is requested. Deprecation is the
+   * maintainer saying "stop using this" — a pre-flight should repeat it. */
+  deprecated?: string;
   /** Set when the name looks like a typosquat of a popular package (offline heuristic). */
   suspiciousName?: { similarTo: string };
   /** How the dep relates to the target runtime, when one was declared (absent = compatible). */

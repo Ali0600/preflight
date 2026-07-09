@@ -30,15 +30,20 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   - `typosquat.ts` — offline lookalike heuristic (bundled top-packages list + Damerau-Levenshtein)
   - `license.ts` — `licenseRisk()` buckets a license id → permissive/copyleft/unknown
   - `cache.ts` — 24h disk cache (`~/.cache/preflight`, per-user XDG; `PREFLIGHT_CACHE_DIR` overrides) wrapping every API call (`setCacheEnabled`). **Only successful fetches are cached** — the clients throw on failure so a transient outage can't poison the cache and silently weaken detection; failures set `Report.degraded` instead
-  - `registry.ts` — latest version + last-publish date + **license** (npm registry / PyPI; under `--latest`)
-  - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`)
+  - `registry.ts` — latest version + last-publish date + **license** + **deprecation map** (sparse
+    version→message: npm `deprecated`, or a PyPI release whose files are ALL yanked — a partial yank
+    stays live; empty-string `deprecated` = un-deprecated, not a signal) (npm/PyPI; under `--latest`)
+  - `depsdev.ts` — deps.dev OpenSSF Scorecard: overall + **per-check** security breakdown (`--health`);
+    also returns the detected SPDX `license` from the same GetVersion call (fills registry gaps)
   - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
   - `combos.ts` — known-bad version *pairs* (break together despite peer ranges admitting each
     other, e.g. eslint 10 × eslint-config-next ≤16 — #31). `plan` holds the subject back to the
     newest known-good runtime-compatible release + dependabot-ignores the boundary. Data-driven
     like lockstep; entries must be documented breakages (strict `satisfies === true` matching —
     never fire on "can't tell")
-  - `verdict.ts` — combine → `malware | cve | pinned | stale | safe` (cve reason adds KEV/EPSS; `stale` needs `--latest`)
+  - `verdict.ts` — combine → `malware | cve | incompatible | deprecated | pinned | stale | safe`
+    (cve reason adds KEV/EPSS; `deprecated` + `stale` need `--latest` and a *resolved* version;
+    policy `failOn.deprecated` auto-enables the registry fetch via `policyNeeds`)
   - `types.ts` — shared shapes **plus** `VERDICT_ORDER` + `VERDICT_LABEL` (worst-first rank + badge
     label). types.ts has **zero imports**, so it's re-exported at the `@preflight/core/types` subpath
     for the web **client** bundle (importing the barrel would drag `node:fs`/`crypto` in). CLI/Action/web

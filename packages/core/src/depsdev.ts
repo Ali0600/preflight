@@ -14,6 +14,9 @@ function system(ecosystem: Ecosystem): string {
 
 interface VersionResponse {
   relatedProjects?: { projectKey?: { id?: string }; relationType?: string }[];
+  /** SPDX 2.1 expressions, e.g. ["MIT"] — deps.dev detects these from the artifact, so they
+   * fill gaps the registry's self-declared `license` field leaves (missing/free-text). */
+  licenses?: string[];
 }
 
 export interface HealthInfo {
@@ -21,6 +24,8 @@ export interface HealthInfo {
   score?: number;
   /** The security-relevant Scorecard checks (name + 0–10 score). */
   checks?: { name: string; score: number }[];
+  /** deps.dev's detected SPDX license expression — a fallback when the registry declares none. */
+  license?: string;
 }
 
 // The Scorecard checks that speak to supply-chain risk (the catalog has ~18; these are the ones
@@ -54,14 +59,15 @@ export async function fetchHealth(
       if (verRes.status === 404) return {};
       if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = (await verRes.json()) as VersionResponse;
+      const license = ver.licenses?.filter((l) => l && l !== 'non-standard').join(' AND ') || undefined;
       const related = ver.relatedProjects ?? [];
       const projectId = (
         related.find((p) => p.relationType === 'SOURCE_REPO') ?? related[0]
       )?.projectKey?.id;
-      if (!projectId) return {};
+      if (!projectId) return { license };
 
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (projRes.status === 404) return {};
+      if (projRes.status === 404) return { license };
       if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = (await projRes.json()) as {
         scorecard?: { overallScore?: number; checks?: { name?: string; score?: number }[] };
@@ -69,7 +75,7 @@ export async function fetchHealth(
       const checks = (proj.scorecard?.checks ?? [])
         .filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0)
         .map((c) => ({ name: c.name!, score: c.score! }));
-      return { score: proj.scorecard?.overallScore, checks };
+      return { score: proj.scorecard?.overallScore, checks, license };
     });
   } catch (err) {
     warn(`deps.dev lookup failed for ${name}@${version}: ${(err as Error).message}`);

@@ -220,3 +220,22 @@ describe('loadPolicy', () => {
     expect(() => loadPolicy('/no/such/preflight.config.json', true)).toThrow(/Policy file not found/);
   });
 });
+
+describe('evaluatePolicy — deprecated rule', () => {
+  it('fails a deprecated dep only when failOn.deprecated is set', () => {
+    const f = finding({ name: 'request', deprecated: 'request has been deprecated', verdict: 'deprecated' });
+    const off = evaluatePolicy([f], { failOn: {} });
+    expect(off.fail).toBe(false);
+    const on = evaluatePolicy([f], { failOn: { deprecated: true } });
+    expect(on.fail).toBe(true);
+    expect(on.violations[0]).toMatchObject({ rule: 'deprecated', dep: 'request@1.0.0' });
+  });
+
+  it('policyNeeds turns on the registry (--latest) fetch for a deprecated rule', () => {
+    expect(policyNeeds({ failOn: { deprecated: true } })).toEqual({
+      latest: true,
+      health: false,
+      runtime: false,
+    });
+  });
+});

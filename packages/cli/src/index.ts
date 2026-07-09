@@ -32,10 +32,14 @@ const BADGE: Record<Verdict, (s: string) => string> = {
   malware: (s) => pc.bgRed(pc.white(pc.bold(` ${s} `))),
   cve: (s) => pc.bgRed(pc.white(` ${s} `)),
   incompatible: (s) => pc.bgBlue(pc.white(` ${s} `)),
+  deprecated: (s) => pc.bgYellow(pc.black(` ${s} `)),
   pinned: (s) => pc.bgYellow(pc.black(` ${s} `)),
   safe: (s) => pc.bgGreen(pc.black(` ${s} `)),
   stale: (s) => pc.bgMagenta(pc.white(` ${s} `)),
 };
+
+// Badge column width tracks the longest shared label so rows stay aligned as verdicts grow.
+const BADGE_PAD = Math.max(...Object.values(VERDICT_LABEL).map((l) => l.length));
 
 // Labels + worst-first ordering are shared from core (VERDICT_LABEL / VERDICT_ORDER) so every
 // surface agrees; only the colours above are CLI-specific.
@@ -51,7 +55,7 @@ function licenseTag(f: Finding): string {
 }
 
 function printFinding(f: Finding): void {
-  const badge = BADGE[f.verdict](VERDICT_LABEL[f.verdict].padEnd(8));
+  const badge = BADGE[f.verdict](VERDICT_LABEL[f.verdict].padEnd(BADGE_PAD));
   const latest = f.latest && f.latest !== f.version ? pc.dim(` · latest ${f.latest}`) : '';
   console.log(
     `${badge}  ${pc.bold(f.name)}${pc.dim(`@${f.version ?? f.range}`)}${latest}${licenseTag(f)}`,
@@ -62,6 +66,10 @@ function printFinding(f: Finding): void {
   }
   if (f.installScript) {
     console.log(`          ${pc.yellow('⚙ runs an install script (code executes on npm install)')}`);
+  }
+  // A worse verdict (cve/incompatible) can outrank `deprecated` — still announce the notice.
+  if (f.deprecated && f.verdict !== 'deprecated') {
+    console.log(`          ${pc.yellow(`⚰ deprecated upstream: ${f.deprecated}`)}`);
   }
   // Early warning: today's install works, but the newest release dropped the target —
   // the next auto-bump breaks. (When the verdict is already `incompatible`, the reason covers it.)
@@ -106,9 +114,10 @@ function printReport(r: Report): void {
     : `${r.total} deps`;
   const malware = r.summary.malware > 0 ? `${r.summary.malware} malware · ` : '';
   const incompat = r.summary.incompatible > 0 ? `${r.summary.incompatible} incompatible · ` : '';
+  const deprecated = r.summary.deprecated > 0 ? `${r.summary.deprecated} deprecated · ` : '';
   console.log(
     pc.dim(
-      `${counts} · ${malware}${r.summary.cve} CVE · ${incompat}${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
+      `${counts} · ${malware}${r.summary.cve} CVE · ${incompat}${deprecated}${r.summary.pinned} pinned · ${r.summary.stale} stale · ${r.summary.safe} safe`,
     ),
   );
   if (r.runtimeTarget) {

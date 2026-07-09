@@ -90,6 +90,7 @@ const EMOJI: Record<Verdict, string> = {
   malware: '☣️',
   cve: '🟥',
   incompatible: '⛔',
+  deprecated: '🪦',
   pinned: '🟨',
   stale: '🟪',
   safe: '🟩',
