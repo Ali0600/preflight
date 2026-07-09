@@ -276,16 +276,31 @@ function describeSources(args: {
 
   // OSV — always consulted (a failed OSV querybatch throws before this runs, so reaching here
   // means the presence scan succeeded; only per-advisory detail fetches can degrade).
+  // Actions manifests get their OWN row name: the check is different (package-level advisory
+  // lookups on every `uses:`, ranges matched locally), and a distinct name keeps the Action's
+  // run-level `aggregateSources` (one row per name) from letting a workflow's "scanned 0
+  // versions" clobber a package manifest's real count.
   const scanned = dependencies.filter((d) => d.version).length;
   const allVulns = findings.flatMap((f) => f.vulns);
   const affected = findings.filter((f) => f.vulns.length > 0).length;
-  sources.push({
-    name: 'OSV.dev (advisories)',
-    status: down('OSV advisory details') ? 'degraded' : 'ok',
-    detail: down('OSV advisory details')
-      ? `scanned ${scanned} package version(s) — some advisory details were unreachable this run`
-      : `scanned ${scanned} package version(s) → ${allVulns.length} advisor${allVulns.length === 1 ? 'y' : 'ies'}${affected ? ` in ${affected} package(s)` : ''}`,
-  });
+  const advisoriesTail = `${allVulns.length} advisor${allVulns.length === 1 ? 'y' : 'ies'}${affected ? ` in ${affected} package(s)` : ''}`;
+  sources.push(
+    ecosystem === 'actions'
+      ? {
+          name: 'OSV.dev (GitHub Actions advisories)',
+          status: down('OSV advisory details') ? 'degraded' : 'ok',
+          detail: down('OSV advisory details')
+            ? `checked ${findings.length} action(s) — some lookups were unreachable this run`
+            : `checked ${findings.length} action(s) → ${advisoriesTail}`,
+        }
+      : {
+          name: 'OSV.dev (advisories)',
+          status: down('OSV advisory details') ? 'degraded' : 'ok',
+          detail: down('OSV advisory details')
+            ? `scanned ${scanned} package version(s) — some advisory details were unreachable this run`
+            : `scanned ${scanned} package version(s) → ${advisoriesTail}`,
+        },
+  );
 
   // KEV + EPSS — consulted only when at least one advisory carries a CVE id (enrichExploitability's gate).
   const cveIds = new Set(allVulns.map((v) => v.cve).filter((c): c is string => Boolean(c)));

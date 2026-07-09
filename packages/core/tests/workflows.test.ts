@@ -173,3 +173,31 @@ describe('evaluatePolicy — unpinned-action rule', () => {
     expect(evaluatePolicy([finding({ mutableRef: false })], { failOn: { unpinnedAction: true } }).fail).toBe(false);
   });
 });
+
+describe('actions report ledger', () => {
+  beforeEach(() => setCacheEnabled(false));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCacheEnabled(true);
+  });
+
+  it('uses a distinct OSV row name so run-level aggregation cannot clobber package rows', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ vulns: [] }), { status: 200 })));
+    const { analyzeManifest } = await import('../src/analyze');
+    const report = await analyzeManifest({
+      ecosystem: 'actions',
+      path: '.github/workflows/ci.yml',
+      dependencies: [
+        { name: 'actions/checkout', range: 'abc123'.padEnd(40, '0'), dev: false, direct: true, mutableRef: false },
+        { name: 'actions/setup-node', range: 'v4', dev: false, direct: true, mutableRef: true },
+      ],
+    });
+    const names = (report.sources ?? []).map((s) => s.name);
+    expect(names).toContain('OSV.dev (GitHub Actions advisories)');
+    expect(names).not.toContain('OSV.dev (advisories)'); // the package-row name stays free
+    const pinRow = report.sources!.find((s) => s.name === 'ref pinning (offline)')!;
+    expect(pinRow.detail).toContain('1 of 2');
+    // No registry-style rows for a workflow manifest.
+    expect(names.some((n) => n.includes('npm registry') || n.includes('deps.dev'))).toBe(false);
+  });
+});
