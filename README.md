@@ -307,6 +307,13 @@ re-runs instant. A *failed* fetch is never cached — if a source is unreachable
 - Unified every signal into a configurable **policy-as-code gate** (`preflight.config.json`) shared by
   the CLI and the Action — one source of truth for what fails the build (denied license, install
   script, typosquat, min-health floor, or a tunable CVE/KEV/EPSS threshold).
+- Expanded coverage across **six additional free data sources and formats** in one release train:
+  upstream **deprecation/yank** surfacing, **runtime end-of-life** detection (endoflife.date),
+  **Sigstore/SLSA build-provenance** verification badges (npm provenance + PyPI PEP 740 via
+  deps.dev), **download-count** enrichment that turns typosquat hunches into evidence,
+  **pnpm/yarn lockfile parsers** (full transitive graphs for all three JS package managers), and
+  **GitHub Actions workflow scanning** — including local advisory-range evaluation after a
+  known-positive probe proved OSV doesn't version-match that ecosystem server-side.
 
 ## License
 [MIT](LICENSE).
