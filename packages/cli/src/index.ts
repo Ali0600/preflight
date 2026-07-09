@@ -45,6 +45,29 @@ const BADGE_PAD = Math.max(...Object.values(VERDICT_LABEL).map((l) => l.length))
 // surface agrees; only the colours above are CLI-specific.
 const byVerdict = (a: Finding, b: Finding) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict];
 
+/** "1234567" -> "1.2M" — weekly download counts read better rounded. */
+function fmtCount(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+
+/** The typosquat warning, with download counts behind it when they were reachable: a lookalike
+ * nobody installs next to a target everyone installs is the classic signature — and a flagged
+ * name that is itself heavily used is probably a legitimate package. */
+function squatLine(s: NonNullable<Finding['suspiciousName']>): string {
+  let line = `⚠ name resembles "${s.similarTo}"`;
+  if (s.downloadsPerWeek !== undefined && s.targetDownloadsPerWeek !== undefined) {
+    line += ` (${fmtCount(s.targetDownloadsPerWeek)} dl/wk) — this package: ${fmtCount(s.downloadsPerWeek)} dl/wk`;
+    if (s.downloadsPerWeek < 1_000 && s.targetDownloadsPerWeek >= 100_000) {
+      line += ' — classic typosquat signature';
+    } else if (s.downloadsPerWeek >= 100_000) {
+      line += ' — both widely used, likely legitimate';
+    }
+  }
+  return `${line} — confirm it's intended`;
+}
+
 function licenseTag(f: Finding): string {
   if (!f.license) return '';
   const risk = licenseRisk(f.license);
@@ -62,7 +85,7 @@ function printFinding(f: Finding): void {
   );
   console.log(`          ${pc.dim(f.reason)}`);
   if (f.suspiciousName) {
-    console.log(`          ${pc.yellow(`⚠ name resembles "${f.suspiciousName.similarTo}" — confirm it's intended`)}`);
+    console.log(`          ${pc.yellow(squatLine(f.suspiciousName))}`);
   }
   if (f.installScript) {
     console.log(`          ${pc.yellow('⚙ runs an install script (code executes on npm install)')}`);
@@ -80,11 +103,15 @@ function printFinding(f: Finding): void {
       `          ${pc.yellow(`⏫ newest release drops ${runtimeLabel(rc.target)}${boundary}`)}`,
     );
   }
-  if (f.health !== undefined) {
+  if (f.health !== undefined || f.downloadsPerWeek !== undefined) {
+    const parts = [
+      f.health !== undefined ? `OpenSSF health ${f.health.toFixed(1)}/10` : undefined,
+      f.downloadsPerWeek !== undefined ? `≈${fmtCount(f.downloadsPerWeek)} dl/wk` : undefined,
+    ].filter(Boolean);
     const weak = f.healthChecks?.length
       ? pc.dim(` · weak: ${f.healthChecks.map((c) => c.name).join(', ')}`)
       : '';
-    console.log(`          ${pc.dim(`OpenSSF health ${f.health.toFixed(1)}/10`)}${weak}`);
+    console.log(`          ${pc.dim(parts.join(' · '))}${weak}`);
   }
   // Build provenance (npm Sigstore / PyPI PEP 740) — only fetched under --health. Most packages
   // ship none, so presence is the notable signal; "verified" is deps.dev's signature check.

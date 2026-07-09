@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
 import { fetchHealth, type HealthInfo } from './depsdev';
+import { fetchDownloads } from './downloads';
 import { fetchRuntimeEol } from './eol';
 import { fetchEpss } from './epss';
 import { fetchKev } from './kev';
@@ -124,6 +125,21 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   // lockstep members — `react` in a Next-only manifest is not "Expo-coordinated" (#18).
   const frameworks = presentFrameworks(directNames);
 
+  // Typosquat heuristic (offline) up-front, so download counts can put numbers behind any hit.
+  // Only deps a human chose (direct) — transitive names are registry-real.
+  const squatHits = new Map<string, string>(); // suspicious name -> the popular package it resembles
+  for (const name of directNames) {
+    const similarTo = typosquatOf(name, ecosystem);
+    if (similarTo) squatHits.set(name, similarTo);
+  }
+  // Download counts are fetched ONLY where they inform something (bounded fan-out, also on the
+  // public web endpoints): typosquat candidates + their targets always; direct deps under --health.
+  const downloadNames = [
+    ...(opts.health ? directNames : []),
+    ...squatHits.keys(),
+    ...squatHits.values(),
+  ];
+
   // Data sources that fail to fetch this run are collected (not cached — see the fetchers) so a
   // green gate that ran with, say, KEV unavailable can announce "exploited-status unknown".
   // A per-call Set (not module state) keeps concurrent web requests from cross-contaminating.
@@ -132,13 +148,14 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
     degraded.add(source);
   };
 
-  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol] = await Promise.all([
+  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol, downloadsMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
     opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : undefined,
     opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : undefined,
     runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : undefined,
     // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
     runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : undefined,
+    downloadNames.length > 0 ? fetchDownloads(downloadNames, ecosystem, onDegraded) : undefined,
   ]);
   await enrichExploitability(vulnMap, onDegraded); // EPSS + KEV — only fires when CVEs were found
 
@@ -165,8 +182,18 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       healthChecks: health?.checks?.filter((c) => c.score < 7), // surface only the weak spots
       installScript: d.installScript,
       provenance: health?.provenance,
-      // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
-      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : undefined,
+      // Typosquat hit (precomputed) + weekly downloads for both sides when reachable — a
+      // lookalike nobody installs next to a target everyone installs is the classic signature.
+      suspiciousName:
+        direct && squatHits.has(d.name)
+          ? {
+              similarTo: squatHits.get(d.name)!,
+              downloadsPerWeek: downloadsMap?.get(d.name),
+              targetDownloadsPerWeek: downloadsMap?.get(squatHits.get(d.name)!),
+            }
+          : undefined,
+      // Adoption display for deps you chose, under --health.
+      downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : undefined,
       runtimeCompat: runtimeMeta
         ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget!, ecosystem)
         : undefined,
@@ -205,6 +232,8 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       runtimeTarget,
       runtimeEol,
       directCount: directNames.length,
+      downloadsRequested: new Set(downloadNames).size,
+      downloadsFetched: downloadsMap?.size ?? 0,
     }),
   };
 }
@@ -222,8 +251,21 @@ function describeSources(args: {
   runtimeTarget?: RuntimeTarget;
   runtimeEol?: RuntimeEol;
   directCount: number;
+  downloadsRequested: number;
+  downloadsFetched: number;
 }): DataSource[] {
-  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, runtimeEol, directCount } = args;
+  const {
+    ecosystem,
+    dependencies,
+    findings,
+    degraded,
+    opts,
+    runtimeTarget,
+    runtimeEol,
+    directCount,
+    downloadsRequested,
+    downloadsFetched,
+  } = args;
   const down = (s: string): boolean => degraded.has(s);
   const registry = ecosystem === 'npm' ? 'npm registry' : 'PyPI';
   const sources: DataSource[] = [];
@@ -304,6 +346,27 @@ function describeSources(args: {
           name: 'deps.dev (Scorecard · provenance)',
           status: 'skipped',
           detail: 'not run — enable with --health / a min-health policy',
+        },
+  );
+
+  // Weekly downloads — consulted for typosquat candidates (+ their targets) and, under
+  // --health, for direct deps. The download source differs per ecosystem.
+  const dlSource = ecosystem === 'npm' ? 'npm downloads' : 'pypistats.org';
+  const dlName = ecosystem === 'npm' ? 'npm downloads API (adoption)' : 'pypistats.org (adoption)';
+  const squatCount = findings.filter((f) => f.suspiciousName).length;
+  sources.push(
+    downloadsRequested > 0
+      ? {
+          name: dlName,
+          status: down(dlSource) ? 'degraded' : 'ok',
+          detail: down(dlSource)
+            ? 'unreachable — adoption/typosquat context missing this run'
+            : `weekly downloads for ${downloadsFetched} of ${downloadsRequested} package(s)${squatCount ? ` · context for ${squatCount} suspicious name(s)` : ''}`,
+        }
+      : {
+          name: dlName,
+          status: 'skipped',
+          detail: 'not needed — no suspicious names (--health adds adoption for direct deps)',
         },
   );
 
@@ -392,8 +455,3 @@ async function fetchHealthAll(
   return out;
 }
 
-/** Wrap the typosquat heuristic into the Finding's `suspiciousName` shape. */
-function typosquatHit(name: string, ecosystem: Ecosystem): { similarTo: string } | undefined {
-  const similarTo = typosquatOf(name, ecosystem);
-  return similarTo ? { similarTo } : undefined;
-}

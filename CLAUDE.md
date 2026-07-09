@@ -32,6 +32,11 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     verdict; policy `failOn.eolRuntime` gates it via `evaluatePolicy`'s `PolicyContext` third arg
     (report-level facts). Runs whenever a runtime target is set; empty cycle list = failure (never cached)
   - `typosquat.ts` — offline lookalike heuristic (bundled top-packages list + Damerau-Levenshtein)
+  - `downloads.ts` — weekly downloads (npm downloads API bulk ≤128/unscoped-only + pypistats.org).
+    **Bounded fan-out by design**: fetched ONLY for typosquat candidates + their targets, and for
+    direct deps under `--health` — never the whole graph (public web endpoints stay bounded).
+    Enriches `suspiciousName` with candidate/target dl/wk; download failure degrades to the
+    offline heuristic (announced). A 404/bulk-null is a legit "not a package", not a failure
   - `license.ts` — `licenseRisk()` buckets a license id → permissive/copyleft/unknown
   - `cache.ts` — 24h disk cache (`~/.cache/preflight`, per-user XDG; `PREFLIGHT_CACHE_DIR` overrides) wrapping every API call (`setCacheEnabled`). **Only successful fetches are cached** — the clients throw on failure so a transient outage can't poison the cache and silently weaken detection; failures set `Report.degraded` instead
   - `registry.ts` — latest version + last-publish date + **license** + **deprecation map** (sparse
