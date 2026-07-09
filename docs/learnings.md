@@ -293,3 +293,22 @@ The fix wasn't complete until the scanner said so (`npm audit`: 0 vulnerabilitie
 **Takeaway:** a vulnerable package is a *node in a graph*, not a line in one dependency chain —
 fixing the path you traced says nothing about the paths you didn't. The finish line for a
 dependency fix is the detector reporting zero, not the bump landing.
+
+## An API can accept your query and silently not evaluate it — probe with a known-positive
+
+Planning GitHub Actions workflow scanning, the OSV docs said the "GitHub Actions" ecosystem is
+supported, and a versioned query (`{package, version}`) is the standard shape used for npm/PyPI.
+Probing first with a *known-affected* input — `tj-actions/changed-files@45.0.7`, inside the
+published advisory range — returned `{}`: OSV stores the advisories (package-level queries return
+them, ECOSYSTEM ranges and all) but does **not** evaluate versioned queries against those ranges
+server-side for this ecosystem. The request is well-formed, the response is well-formed, and the
+answer is silently meaningless. The fix was architectural: query per package and evaluate the
+advisory ranges locally with our own semver machinery. Shipped naively, the feature would have
+been a scanner that is always green — the worst kind of security tool.
+
+**Why it came up:** PR #55 (workflow scanning), during the pre-coding API-shape verification the
+repo's conventions require.
+
+**Takeaway:** before building on a query capability, send a request whose correct answer you
+already know is non-empty ("known-positive probe"). A schema-valid `{}` from a supported endpoint
+is indistinguishable from "no findings" unless you already know findings exist.
