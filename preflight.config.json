@@ -3,7 +3,8 @@
     "vuln": "cve",
     "installScript": true,
     "suspiciousName": true,
-    "deprecated": true
+    "deprecated": true,
+    "unpinnedAction": true
   },
   "allow": {
     "installScripts": ["esbuild", "fsevents", "sharp"]

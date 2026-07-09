@@ -23,6 +23,15 @@ const POPULAR: Record<Ecosystem, string[]> = {
     'six', 'pyyaml', 'cryptography', 'python-dateutil', 'virtualenv', 'colorama', 'tqdm', 'rich',
     'httpx', 'typer', 'poetry', 'selenium', 'openai', 'anyio', 'attrs',
   ],
+  // High-value `uses:` targets — a one-edit owner/repo (`action/checkout`, `actions/checkout2`)
+  // is the workflow flavor of the same attack. Names are `owner/repo`; normalize keeps the `/`.
+  actions: [
+    'actions/checkout', 'actions/setup-node', 'actions/setup-python', 'actions/setup-java',
+    'actions/setup-go', 'actions/cache', 'actions/upload-artifact', 'actions/download-artifact',
+    'actions/github-script', 'github/codeql-action', 'docker/build-push-action',
+    'docker/setup-buildx-action', 'docker/login-action', 'softprops/action-gh-release',
+    'peaceiris/actions-gh-pages', 'codecov/codecov-action', 'pypa/gh-action-pypi-publish',
+  ],
 };
 
 /** Normalize separators so `cross_env`/`cross.env` compare against `cross-env`. Scopes are kept:
@@ -35,6 +44,7 @@ function normalize(name: string): string {
 const NORM: Record<Ecosystem, Set<string>> = {
   npm: new Set(POPULAR.npm.map(normalize)),
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
+  actions: new Set(POPULAR.actions.map(normalize)),
 };
 
 /** True iff the Damerau-Levenshtein distance between a and b is exactly 1 (incl. one transposition). */

@@ -36,8 +36,9 @@ import {
   type SkippedManifest,
 } from './report';
 
-// package.json or requirements*.txt, anywhere in the tree.
-const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i;
+// package.json / requirements*.txt anywhere in the tree, plus GitHub Actions workflow files
+// (their `uses:` entries are scanned against OSV's "GitHub Actions" ecosystem).
+const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 // A lockfile-only change still moves the installed tree (transitive adds/bumps) —
 // it must trigger the scan of its sibling manifest too (dogfood BUG-3/#20).
 const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
@@ -257,7 +258,9 @@ function writeSarif(reports: Report[]): void {
   core.setOutput('sarif-file', 'preflight.sarif');
 }
 
-/** Recursively find manifest files, skipping dot-dirs and dependency/build folders. */
+/** Recursively find manifest files, skipping dot-dirs and dependency/build folders.
+ * `.github` is the one dot-dir we enter — workflow files are manifests now — and the pattern
+ * is tested against the whole relative path (the workflow rule needs `.github/workflows/` in it). */
 function findManifests(root: string): string[] {
   const skip = new Set(['node_modules', 'dist', 'coverage']);
   const out: string[] = [];
@@ -265,8 +268,8 @@ function findManifests(root: string): string[] {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) {
-        if (!e.name.startsWith('.') && !skip.has(e.name)) walk(p);
-      } else if (MANIFEST.test(e.name)) {
+        if ((!e.name.startsWith('.') || e.name === '.github') && !skip.has(e.name)) walk(p);
+      } else if (MANIFEST.test(p)) {
         out.push(p);
       }
     }

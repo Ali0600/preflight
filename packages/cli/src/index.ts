@@ -94,6 +94,13 @@ function printFinding(f: Finding): void {
   if (f.deprecated && f.verdict !== 'deprecated') {
     console.log(`          ${pc.yellow(`⚰ deprecated upstream: ${f.deprecated}`)}`);
   }
+  // Workflow `uses:` pinned to a tag/branch — the ref can be moved to different code after
+  // review (the tj-actions compromise vector). A full commit SHA is the only immutable pin.
+  if (f.mutableRef) {
+    console.log(
+      `          ${pc.yellow(`📌 pinned to a mutable ref "@${f.range}" — a moved tag swaps the code; pin the full commit SHA`)}`,
+    );
+  }
   // Early warning: today's install works, but the newest release dropped the target —
   // the next auto-bump breaks. (When the verdict is already `incompatible`, the reason covers it.)
   if (f.runtimeCompat?.latestIncompatible && f.verdict !== 'incompatible') {
