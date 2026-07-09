@@ -6,6 +6,7 @@ export { fetchHealth, type HealthInfo, type ProvenanceInfo } from './depsdev';
 export { fetchEpss, type EpssScore } from './epss';
 export { fetchKev } from './kev';
 export { typosquatOf } from './typosquat';
+export { fetchDownloads } from './downloads';
 export { licenseRisk, type LicenseRisk } from './license';
 export { lockstepFor, presentFrameworks, FRAMEWORK_SETS } from './lockstep';
 export {

@@ -136,8 +136,12 @@ export interface Finding {
    * PyPI fully-yanked release), when `--latest` is requested. Deprecation is the
    * maintainer saying "stop using this" — a pre-flight should repeat it. */
   deprecated?: string;
-  /** Set when the name looks like a typosquat of a popular package (offline heuristic). */
-  suspiciousName?: { similarTo: string };
+  /** Set when the name looks like a typosquat of a popular package (offline heuristic).
+   * Weekly download counts (when reachable) put numbers behind the hunch: a lookalike nobody
+   * installs next to a target everyone installs is the classic typosquat signature. */
+  suspiciousName?: { similarTo: string; downloadsPerWeek?: number; targetDownloadsPerWeek?: number };
+  /** Weekly downloads (npm downloads API / pypistats.org) for direct deps under `--health`. */
+  downloadsPerWeek?: number;
   /** How the dep relates to the target runtime, when one was declared (absent = compatible). */
   runtimeCompat?: RuntimeCompat;
   verdict: Verdict;

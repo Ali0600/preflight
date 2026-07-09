@@ -67,8 +67,10 @@ no install, no account.
   **plus build provenance**: a 🔏 badge when the version ships a *verified* attestation (npm
   Sigstore provenance / PyPI PEP 740) proving which repo and CI run actually built the artifact.
 - **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
-  vector), names that look like **typosquats** of popular packages (fully offline), risky/unknown
-  **licenses**, and weak **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
+  vector), names that look like **typosquats** of popular packages (offline heuristic, then
+  **weekly download counts** put numbers behind the hunch: `resembles "lodash" (155M dl/wk) —
+  this package: 43 dl/wk — classic typosquat signature`), risky/unknown **licenses**, and weak
+  **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
 - **Deprecation surfacing** — under `--latest`, a dependency whose resolved version the maintainer
   deprecated (npm's `deprecated` notice) or **yanked from PyPI** gets its own `deprecated` verdict,
   with the upstream message repeated verbatim — the "stop using this" signal `npm install` prints
@@ -261,6 +263,8 @@ CI, or the dashboard) with zero configuration.
 | **npm registry** | Latest version + last-publish date + per-version deprecation → the `stale` / `deprecated` verdicts | `registry.npmjs.org` |
 | **PyPI** (JSON) | Latest version + upload time + yanked releases, for pip manifests | `pypi.org/pypi/{name}/json` |
 | **endoflife.date** | End-of-life date of the *target runtime* (Node/Python) — flags a dead interpreter no dependency bump can fix | `endoflife.date/api/{product}.json` |
+| **npm downloads API** | Weekly downloads — context for typosquat hits, adoption under `--health` (bulk ≤128/request) | `api.npmjs.org/downloads` |
+| **pypistats.org** | Weekly downloads for PyPI packages (same role) | `pypistats.org/api/packages/{p}/recent` |
 
 Every **successful** response is cached on disk for 24h (`~/.cache/preflight`; set
 `PREFLIGHT_CACHE_DIR` to override, or `--no-cache` to skip) to be a good API citizen and make

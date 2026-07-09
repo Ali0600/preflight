@@ -24474,6 +24474,84 @@ function typosquatOf(name, ecosystem) {
   return void 0;
 }
 
+// ../core/src/downloads.ts
+var NPM_API = "https://api.npmjs.org/downloads/point/last-week";
+var PYPISTATS = "https://pypistats.org/api/packages";
+var NPM_BULK_MAX = 128;
+async function fetchDownloads(names, ecosystem, onDegraded) {
+  const out = /* @__PURE__ */ new Map();
+  const unique = [...new Set(names)];
+  if (unique.length === 0) return out;
+  if (ecosystem === "npm") {
+    const scoped = unique.filter((n) => n.startsWith("@"));
+    const plain = unique.filter((n) => !n.startsWith("@"));
+    const jobs = [];
+    for (let i = 0; i < plain.length; i += NPM_BULK_MAX) {
+      const chunk2 = plain.slice(i, i + NPM_BULK_MAX);
+      jobs.push(npmBulk(chunk2, out, onDegraded));
+    }
+    for (const name of scoped) jobs.push(npmSingle(name, out, onDegraded));
+    await Promise.all(jobs);
+    return out;
+  }
+  await Promise.all(unique.map((name) => pypiSingle(name, out, onDegraded)));
+  return out;
+}
+async function npmBulk(chunk2, out, onDegraded) {
+  try {
+    const rows = await cached(`downloads:npm:${chunk2.join(",")}`, async () => {
+      const r = await fetch(`${NPM_API}/${chunk2.map(encodeURIComponent).join(",")}`);
+      if (r.status === 404) return {};
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (chunk2.length === 1 && typeof j.downloads === "number") {
+        return { [chunk2[0]]: j.downloads };
+      }
+      const counts = {};
+      for (const [name, row] of Object.entries(j)) {
+        if (row && typeof row === "object" && typeof row.downloads === "number") {
+          counts[name] = row.downloads;
+        }
+      }
+      return counts;
+    });
+    for (const [name, n] of Object.entries(rows)) out.set(name, n);
+  } catch (err) {
+    warn(`npm downloads lookup failed: ${err.message}`);
+    onDegraded?.("npm downloads");
+  }
+}
+async function npmSingle(name, out, onDegraded) {
+  try {
+    const n = await cached(`downloads:npm:${name}`, async () => {
+      const r = await fetch(`${NPM_API}/${encodeURIComponent(name)}`);
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      return typeof j.downloads === "number" ? j.downloads : null;
+    });
+    if (n !== null) out.set(name, n);
+  } catch (err) {
+    warn(`npm downloads lookup failed for ${name}: ${err.message}`);
+    onDegraded?.("npm downloads");
+  }
+}
+async function pypiSingle(name, out, onDegraded) {
+  try {
+    const n = await cached(`downloads:pypi:${name}`, async () => {
+      const r = await fetch(`${PYPISTATS}/${encodeURIComponent(name.toLowerCase())}/recent`);
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      return typeof j.data?.last_week === "number" ? j.data.last_week : null;
+    });
+    if (n !== null) out.set(name, n);
+  } catch (err) {
+    warn(`pypistats lookup failed for ${name}: ${err.message}`);
+    onDegraded?.("pypistats.org");
+  }
+}
+
 // ../core/src/license.ts
 var COPYLEFT = /\b(a?gpl|lgpl|mpl|epl|cddl|osl|eupl|cpal|sleepycat)\b/i;
 var PERMISSIVE = /\b(mit|apache|bsd|isc|0bsd|unlicense|wtfpl|zlib|cc0|python|psf)\b/i;
@@ -25443,17 +25521,28 @@ async function analyzeManifest(manifest, opts = {}) {
   const directNames = [...new Set(directDeps.map((d) => d.name))];
   const runtimeTarget = opts.runtimes?.[ecosystem === "npm" ? "node" : "python"];
   const frameworks = presentFrameworks(directNames);
+  const squatHits = /* @__PURE__ */ new Map();
+  for (const name of directNames) {
+    const similarTo = typosquatOf(name, ecosystem);
+    if (similarTo) squatHits.set(name, similarTo);
+  }
+  const downloadNames = [
+    ...opts.health ? directNames : [],
+    ...squatHits.keys(),
+    ...squatHits.values()
+  ];
   const degraded = /* @__PURE__ */ new Set();
   const onDegraded = (source) => {
     degraded.add(source);
   };
-  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol] = await Promise.all([
+  const [vulnMap, registryMap, healthMap, runtimeMap, runtimeEol, downloadsMap] = await Promise.all([
     fetchVulns(dependencies, ecosystem, onDegraded),
     opts.latest ? fetchRegistryAll(directNames, ecosystem, onDegraded) : void 0,
     opts.health ? fetchHealthAll(directDeps, ecosystem, onDegraded) : void 0,
     runtimeTarget ? fetchRuntimeMetaAll(directNames, ecosystem, onDegraded) : void 0,
     // One keyless call per product (24h-cached): is the target runtime itself end-of-life?
-    runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : void 0
+    runtimeTarget ? fetchRuntimeEol(runtimeTarget, onDegraded) : void 0,
+    downloadNames.length > 0 ? fetchDownloads(downloadNames, ecosystem, onDegraded) : void 0
   ]);
   await enrichExploitability(vulnMap, onDegraded);
   const findings = dependencies.map((d) => {
@@ -25480,8 +25569,15 @@ async function analyzeManifest(manifest, opts = {}) {
       // surface only the weak spots
       installScript: d.installScript,
       provenance: health?.provenance,
-      // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
-      suspiciousName: direct ? typosquatHit(d.name, ecosystem) : void 0,
+      // Typosquat hit (precomputed) + weekly downloads for both sides when reachable — a
+      // lookalike nobody installs next to a target everyone installs is the classic signature.
+      suspiciousName: direct && squatHits.has(d.name) ? {
+        similarTo: squatHits.get(d.name),
+        downloadsPerWeek: downloadsMap?.get(d.name),
+        targetDownloadsPerWeek: downloadsMap?.get(squatHits.get(d.name))
+      } : void 0,
+      // Adoption display for deps you chose, under --health.
+      downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : void 0,
       runtimeCompat: runtimeMeta ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget, ecosystem) : void 0
     };
     const { verdict, reason } = decideVerdict(base);
@@ -25515,12 +25611,25 @@ async function analyzeManifest(manifest, opts = {}) {
       opts,
       runtimeTarget,
       runtimeEol,
-      directCount: directNames.length
+      directCount: directNames.length,
+      downloadsRequested: new Set(downloadNames).size,
+      downloadsFetched: downloadsMap?.size ?? 0
     })
   };
 }
 function describeSources(args) {
-  const { ecosystem, dependencies, findings, degraded, opts, runtimeTarget, runtimeEol, directCount } = args;
+  const {
+    ecosystem,
+    dependencies,
+    findings,
+    degraded,
+    opts,
+    runtimeTarget,
+    runtimeEol,
+    directCount,
+    downloadsRequested,
+    downloadsFetched
+  } = args;
   const down = (s) => degraded.has(s);
   const registry = ecosystem === "npm" ? "npm registry" : "PyPI";
   const sources = [];
@@ -25576,6 +25685,20 @@ function describeSources(args) {
       name: "deps.dev (Scorecard \xB7 provenance)",
       status: "skipped",
       detail: "not run \u2014 enable with --health / a min-health policy"
+    }
+  );
+  const dlSource = ecosystem === "npm" ? "npm downloads" : "pypistats.org";
+  const dlName = ecosystem === "npm" ? "npm downloads API (adoption)" : "pypistats.org (adoption)";
+  const squatCount = findings.filter((f) => f.suspiciousName).length;
+  sources.push(
+    downloadsRequested > 0 ? {
+      name: dlName,
+      status: down(dlSource) ? "degraded" : "ok",
+      detail: down(dlSource) ? "unreachable \u2014 adoption/typosquat context missing this run" : `weekly downloads for ${downloadsFetched} of ${downloadsRequested} package(s)${squatCount ? ` \xB7 context for ${squatCount} suspicious name(s)` : ""}`
+    } : {
+      name: dlName,
+      status: "skipped",
+      detail: "not needed \u2014 no suspicious names (--health adds adoption for direct deps)"
     }
   );
   if (runtimeTarget) {
@@ -25636,10 +25759,6 @@ async function fetchHealthAll(deps, ecosystem, onDegraded) {
     })
   );
   return out;
-}
-function typosquatHit(name, ecosystem) {
-  const similarTo = typosquatOf(name, ecosystem);
-  return similarTo ? { similarTo } : void 0;
 }
 
 // src/report.ts
