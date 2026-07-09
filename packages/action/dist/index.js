@@ -24243,6 +24243,15 @@ var SECURITY_CHECKS = /* @__PURE__ */ new Set([
   "Signed-Releases",
   "Vulnerabilities"
 ]);
+function readProvenance(ver) {
+  const all = [...ver.attestations ?? [], ...ver.slsaProvenances ?? []];
+  if (all.length === 0) return void 0;
+  const verified = all.filter((a) => a.verified === true);
+  return {
+    verified: verified.length > 0,
+    sourceRepository: (verified[0] ?? all[0]).sourceRepository
+  };
+}
 async function fetchHealth(name, version, ecosystem, onDegraded) {
   try {
     return await cached(`depsdev:${ecosystem}:${name}:${version}`, async () => {
@@ -24254,15 +24263,16 @@ async function fetchHealth(name, version, ecosystem, onDegraded) {
       if (!verRes.ok) throw new Error(`HTTP ${verRes.status}`);
       const ver = await verRes.json();
       const license = ver.licenses?.filter((l) => l && l !== "non-standard").join(" AND ") || void 0;
+      const provenance = readProvenance(ver);
       const related = ver.relatedProjects ?? [];
       const projectId = (related.find((p) => p.relationType === "SOURCE_REPO") ?? related[0])?.projectKey?.id;
-      if (!projectId) return { license };
+      if (!projectId) return { license, provenance };
       const projRes = await fetch(`${DEPSDEV}/projects/${encodeURIComponent(projectId)}`);
-      if (projRes.status === 404) return { license };
+      if (projRes.status === 404) return { license, provenance };
       if (!projRes.ok) throw new Error(`HTTP ${projRes.status}`);
       const proj = await projRes.json();
       const checks = (proj.scorecard?.checks ?? []).filter((c) => c.name && SECURITY_CHECKS.has(c.name) && (c.score ?? -1) >= 0).map((c) => ({ name: c.name, score: c.score }));
-      return { score: proj.scorecard?.overallScore, checks, license };
+      return { score: proj.scorecard?.overallScore, checks, license, provenance };
     });
   } catch (err) {
     warn(`deps.dev lookup failed for ${name}@${version}: ${err.message}`);
@@ -25469,6 +25479,7 @@ async function analyzeManifest(manifest, opts = {}) {
       healthChecks: health?.checks?.filter((c) => c.score < 7),
       // surface only the weak spots
       installScript: d.installScript,
+      provenance: health?.provenance,
       // Typosquat heuristic only on deps a human chose (direct); transitive names are registry-real.
       suspiciousName: direct ? typosquatHit(d.name, ecosystem) : void 0,
       runtimeCompat: runtimeMeta ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget, ecosystem) : void 0
@@ -25555,13 +25566,14 @@ function describeSources(args) {
       detail: "not run \u2014 enable with --latest / a license or deprecated policy"
     }
   );
+  const attested = findings.filter((f) => f.provenance?.verified).length;
   sources.push(
     opts.health ? {
-      name: "deps.dev (OpenSSF Scorecard)",
+      name: "deps.dev (Scorecard \xB7 provenance)",
       status: down("deps.dev") ? "degraded" : "ok",
-      detail: down("deps.dev") ? "unreachable \u2014 health scores may be missing" : `health score for ${findings.filter((f) => f.health !== void 0).length} dep(s)`
+      detail: down("deps.dev") ? "unreachable \u2014 health scores/provenance may be missing" : `health score for ${findings.filter((f) => f.health !== void 0).length} dep(s)${attested ? ` \xB7 ${attested} with verified build provenance` : ""}`
     } : {
-      name: "deps.dev (OpenSSF Scorecard)",
+      name: "deps.dev (Scorecard \xB7 provenance)",
       status: "skipped",
       detail: "not run \u2014 enable with --health / a min-health policy"
     }
@@ -25618,7 +25630,7 @@ async function fetchHealthAll(deps, ecosystem, onDegraded) {
   await Promise.all(
     deps.filter((d) => d.version).map(async (d) => {
       const health = await fetchHealth(d.name, d.version, ecosystem, onDegraded);
-      if (health.score !== void 0 || health.checks?.length || health.license) {
+      if (health.score !== void 0 || health.checks?.length || health.license || health.provenance) {
         out.set(d.name, health);
       }
     })

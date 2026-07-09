@@ -126,6 +126,10 @@ export interface Finding {
   healthChecks?: { name: string; score: number }[];
   /** True when the package runs an install script (npm) — a supply-chain code-execution surface. */
   installScript?: boolean;
+  /** Build/publish attestation (npm Sigstore provenance / PyPI PEP 740), when `--health` is
+   * requested. `verified` = deps.dev checked the signature; `sourceRepository` = the repo the
+   * artifact provably came from. Absent = none shipped (true of most packages — informational). */
+  provenance?: { verified: boolean; sourceRepository?: string };
   /** SPDX-ish license id (e.g. "MIT", "GPL-3.0"), when `--latest` is requested. */
   license?: string;
   /** Upstream deprecation notice for the resolved version (npm `deprecated` message /
