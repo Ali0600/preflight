@@ -33279,11 +33279,18 @@ function describeSources(args) {
   const scanned = dependencies.filter((d) => d.version).length;
   const allVulns = findings.flatMap((f) => f.vulns);
   const affected = findings.filter((f) => f.vulns.length > 0).length;
-  sources.push({
-    name: "OSV.dev (advisories)",
-    status: down("OSV advisory details") ? "degraded" : "ok",
-    detail: down("OSV advisory details") ? `scanned ${scanned} package version(s) \u2014 some advisory details were unreachable this run` : `scanned ${scanned} package version(s) \u2192 ${allVulns.length} advisor${allVulns.length === 1 ? "y" : "ies"}${affected ? ` in ${affected} package(s)` : ""}`
-  });
+  const advisoriesTail = `${allVulns.length} advisor${allVulns.length === 1 ? "y" : "ies"}${affected ? ` in ${affected} package(s)` : ""}`;
+  sources.push(
+    ecosystem === "actions" ? {
+      name: "OSV.dev (GitHub Actions advisories)",
+      status: down("OSV advisory details") ? "degraded" : "ok",
+      detail: down("OSV advisory details") ? `checked ${findings.length} action(s) \u2014 some lookups were unreachable this run` : `checked ${findings.length} action(s) \u2192 ${advisoriesTail}`
+    } : {
+      name: "OSV.dev (advisories)",
+      status: down("OSV advisory details") ? "degraded" : "ok",
+      detail: down("OSV advisory details") ? `scanned ${scanned} package version(s) \u2014 some advisory details were unreachable this run` : `scanned ${scanned} package version(s) \u2192 ${advisoriesTail}`
+    }
+  );
   const cveIds = new Set(allVulns.map((v) => v.cve).filter((c) => Boolean(c)));
   if (cveIds.size > 0) {
     const kevCount = new Set(allVulns.filter((v) => v.kev && v.cve).map((v) => v.cve)).size;
