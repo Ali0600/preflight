@@ -9,7 +9,14 @@
     "url": "git+https://github.com/Ali0600/preflight.git",
     "directory": "packages/core"
   },
-  "keywords": ["dependencies", "security", "vulnerabilities", "osv", "supply-chain", "lockstep"],
+  "keywords": [
+    "dependencies",
+    "security",
+    "vulnerabilities",
+    "osv",
+    "supply-chain",
+    "lockstep"
+  ],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -18,5 +25,8 @@
   },
   "scripts": {
     "build": "tsup"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }
