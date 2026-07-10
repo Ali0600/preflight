@@ -312,3 +312,22 @@ repo's conventions require.
 **Takeaway:** before building on a query capability, send a request whose correct answer you
 already know is non-empty ("known-positive probe"). A schema-valid `{}` from a supported endpoint
 is indistinguishable from "no findings" unless you already know findings exist.
+
+## SHA-pinning GitHub Actions — labels move, fingerprints don't
+
+A `uses: owner/action@v4` line runs someone else's code in your CI with your secrets in reach.
+`v4` is a git tag — a movable label the *action's owner* controls; they (or whoever hacks them)
+can point it at different code tomorrow and your next build runs it, with no diff in your repo
+to review. A 40-character commit SHA is a fingerprint computed from the code itself — it can
+never be redirected, so `uses: owner/action@<sha>  # v4.1.2` freezes exactly what you audited.
+Updates still happen, but as Dependabot PRs you approve. The March 2025 `tj-actions/changed-files`
+compromise was exactly this: tags moved onto secret-dumping code, thousands of repos ran it
+automatically. One deliberate exception: a tag you *own* as a release channel (consumers ride
+`preflight@v1` so moving the tag ships updates) — there the mutability is the feature, and the
+trust question ("who can move this label?") answers "me".
+
+**Why it came up:** Preflight's new workflow scanning (#55) flagged the landing repo's own
+`actions/checkout@v4` — and the user asked what SHA-pinning even means.
+
+**Takeaway:** in CI, a version *label* is a live trust relationship with whoever controls it; a
+*SHA* is a one-time trust decision. Pin third-party actions to SHAs; float only on tags you own.
