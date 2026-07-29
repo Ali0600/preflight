@@ -30,6 +30,7 @@ import {
   renderComment,
   renderPolicySection,
   renderRepoIssue,
+  repoFailCount,
   ISSUE_MARKER,
   MARKER,
   type ManifestReport,
@@ -76,16 +77,22 @@ async function run(): Promise<void> {
   // fail the run, not silently become an empty policy that gates nothing. Throw → setFailed.
   const policy = policyFile ? loadPolicy(policyFile, true) : undefined;
 
-  // With a policy file the policy is authoritative and fail-level is ignored — say so, or a
-  // vuln-less policy silently stops gating CVEs even though fail-level looks set (mirrors the CLI).
-  if (policy && failLevelInput) {
+  const mode = core.getInput('mode') || 'pr';
+
+  // PR mode: a policy file is authoritative and fail-level is ignored — say so, or a vuln-less
+  // policy silently stops gating CVEs even though fail-level looks set (mirrors the CLI). Repo
+  // mode doesn't apply the policy's `failOn` rules, so fail-level still drives its severity
+  // threshold there — no warning, it's not ignored.
+  if (policy && failLevelInput && mode !== 'repo') {
     core.warning('Preflight: policy-file governs the gate — the fail-level input is ignored.');
   }
 
-  if ((core.getInput('mode') || 'pr') === 'repo') {
+  if (mode === 'repo') {
     // Repo mode consults only the policy's `allow.advisories` (adjudicated advisories are listed
     // but don't fail) and `runtimes` — NOT the `failOn` rules, which are PR-introduces-X semantics.
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? []);
+    // `fail-level` sets the severity a finding must meet to FAIL the run (default `cve` = any);
+    // everything is still listed in the tracking issue regardless.
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? [], failLevel);
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -208,6 +215,7 @@ async function runRepoScan(
   failOnCve: boolean,
   runtimes: AnalyzeOptions['runtimes'],
   allowAdvisories: string[],
+  failLevel: string,
 ): Promise<void> {
   // `ignore-paths`: comma-separated globs for manifests the scheduled scan should not report on
   // (e.g. intentionally-vulnerable demo/fixture files that would drown real findings in noise).
@@ -239,15 +247,21 @@ async function runRepoScan(
   }
 
   writeSarif(reports);
+  // `count` is every finding (drives the issue). `failCount` is the subset meeting `fail-level`
+  // (drives the red X) — so a scheduled scan can list everything yet fail only on, say, KEV.
+  // Malware always counts; adjudicated advisories never do (both handled in report.ts).
   const { body, count } = renderRepoIssue(reports, skipped, ignored, allowAdvisories);
+  const failCount = repoFailCount(reports, allowAdvisories, failLevel);
   await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   core.setOutput('vuln-count', count);
+  core.setOutput('fail-count', failCount);
   core.setOutput('scan-errors', skipped.length);
-  if (failOnCve && (count > 0 || skipped.length > 0)) {
+  if (failOnCve && (failCount > 0 || skipped.length > 0)) {
+    const level = failLevel === 'cve' ? '' : ` at or above fail-level "${failLevel}"`;
     const detail =
       skipped.length > 0
-        ? `${count} known vulnerability finding(s), and ${skipped.length} manifest(s) that failed to scan (failing closed)`
-        : `${count} known vulnerability finding(s) across the repo's manifests`;
+        ? `${failCount} finding(s)${level}, and ${skipped.length} manifest(s) that failed to scan (failing closed)`
+        : `${failCount} finding(s)${level} across the repo's manifests`;
     core.setFailed(`Preflight: ${detail}.`);
   }
 }

@@ -33627,6 +33627,18 @@ function renderRepoIssue(reports, skipped = [], ignored = [], allowAdvisories = 
   lines.push(`_Last scanned ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}._`);
   return { body: lines.join("\n"), count };
 }
+function repoFailCount(reports, allowAdvisories, failLevel) {
+  const allow = new Set(allowAdvisories);
+  const isVuln = (f) => f.verdict === "malware" || f.verdict === "cve";
+  let n = 0;
+  for (const r of reports) {
+    for (const f of r.findings) {
+      if (!isVuln(f) || isAdjudicated(f, allow)) continue;
+      if (meetsVulnLevel(f, failLevel)) n += 1;
+    }
+  }
+  return n;
+}
 var TRANSITIVE_ROWS = 10;
 function renderComment(results, skipped = []) {
   const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
@@ -33762,11 +33774,12 @@ async function run() {
   const failLevel = failLevelInput || "cve";
   const policyFile = getInput("policy-file");
   const policy = policyFile ? loadPolicy(policyFile, true) : void 0;
-  if (policy && failLevelInput) {
+  const mode = getInput("mode") || "pr";
+  if (policy && failLevelInput && mode !== "repo") {
     warning("Preflight: policy-file governs the gate \u2014 the fail-level input is ignored.");
   }
-  if ((getInput("mode") || "pr") === "repo") {
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? []);
+  if (mode === "repo") {
+    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? [], failLevel);
   } else {
     await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
   }
@@ -33845,7 +33858,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     setFailed(`Preflight: this PR ${why}.`);
   }
 }
-async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvisories) {
+async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvisories, failLevel) {
   const ignoreGlobs = getInput("ignore-paths").split(",").map((p) => p.trim()).filter(Boolean);
   const all = findManifests(".");
   const ignored = ignoreGlobs.length ? all.filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
@@ -33867,11 +33880,14 @@ async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvis
   }
   writeSarif(reports);
   const { body, count } = renderRepoIssue(reports, skipped, ignored, allowAdvisories);
+  const failCount = repoFailCount(reports, allowAdvisories, failLevel);
   await upsertIssue(octokit, owner, repo, body, count > 0 || skipped.length > 0);
   setOutput("vuln-count", count);
+  setOutput("fail-count", failCount);
   setOutput("scan-errors", skipped.length);
-  if (failOnCve && (count > 0 || skipped.length > 0)) {
-    const detail = skipped.length > 0 ? `${count} known vulnerability finding(s), and ${skipped.length} manifest(s) that failed to scan (failing closed)` : `${count} known vulnerability finding(s) across the repo's manifests`;
+  if (failOnCve && (failCount > 0 || skipped.length > 0)) {
+    const level = failLevel === "cve" ? "" : ` at or above fail-level "${failLevel}"`;
+    const detail = skipped.length > 0 ? `${failCount} finding(s)${level}, and ${skipped.length} manifest(s) that failed to scan (failing closed)` : `${failCount} finding(s)${level} across the repo's manifests`;
     setFailed(`Preflight: ${detail}.`);
   }
 }

@@ -13,6 +13,7 @@ import {
   renderComment,
   renderPolicySection,
   renderRepoIssue,
+  repoFailCount,
   renderSources,
   shouldFail,
   ISSUE_MARKER,
@@ -502,5 +503,49 @@ describe('shouldFail (fail-level, over what the PR introduces)', () => {
   it('malware always fails regardless of level', () => {
     const mal = { ...cveFinding('a', { malicious: true }), verdict: 'malware' as const };
     expect(shouldFail([result(mal)], 'kev')).toBe(true);
+  });
+});
+
+describe('repoFailCount (repo mode — report everything, fail only at level)', () => {
+  const cve = (name: string, vuln: Partial<Finding['vulns'][number]> = {}): Finding => ({
+    name,
+    range: '^1',
+    version: '1.0.0',
+    dev: false,
+    vulns: [{ id: `GHSA-${name}`, summary: 's', severity: 'high', cve: `CVE-${name}`, ...vuln }],
+    lockstep: { pinned: false },
+    verdict: 'cve',
+    reason: 'cve',
+  });
+
+  it('default "cve" counts every CVE/malware finding (unchanged behavior)', () => {
+    const r = report([cve('a'), cve('b', { kev: true }), { ...cve('c', { malicious: true }), verdict: 'malware' }]);
+    expect(repoFailCount([r], [], 'cve')).toBe(3);
+  });
+
+  it('"kev" counts only actively-exploited CVEs — mirrors nutridex: many high, none KEV → 0', () => {
+    // Six high, non-exploited CVEs (the real nutridex scan): reported, but must NOT fail on kev.
+    const highs = ['next', 'postcss', 'brace1', 'brace2', 'postcss2', 'sharp'].map((n) => cve(n));
+    expect(repoFailCount([report(highs)], [], 'cve')).toBe(6); // all listed/counted for the issue
+    expect(repoFailCount([report(highs)], [], 'kev')).toBe(0); // …but none fail the kev gate
+    // Add one that IS exploited → kev now fails on exactly that one.
+    expect(repoFailCount([report([...highs, cve('exploited', { kev: true })])], [], 'kev')).toBe(1);
+  });
+
+  it('malware always counts, even at kev', () => {
+    const mal = report([{ ...cve('m', { malicious: true }), verdict: 'malware' }]);
+    expect(repoFailCount([mal], [], 'kev')).toBe(1);
+  });
+
+  it('adjudicated advisories (allow.advisories) never count', () => {
+    const r = report([cve('a', { kev: true })]);
+    // The one KEV finding is adjudicated away → 0, even though it meets the level.
+    expect(repoFailCount([r], ['CVE-a'], 'kev')).toBe(0);
+    expect(repoFailCount([r], [], 'kev')).toBe(1); // control: without the allow it fails
+  });
+
+  it('ignores non-vuln verdicts (deprecated/stale/safe never fail the scan)', () => {
+    const r = report([finding('d', 'deprecated'), finding('s', 'stale'), finding('ok', 'safe')]);
+    expect(repoFailCount([r], [], 'cve')).toBe(0);
   });
 });

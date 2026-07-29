@@ -348,6 +348,30 @@ export function renderRepoIssue(
   return { body: lines.join('\n'), count };
 }
 
+/** How many findings would FAIL the scheduled check at `failLevel` — a subset of the findings the
+ * issue lists. Report ≠ fail: the tracking issue shows every CVE/malware finding (see
+ * `renderRepoIssue`'s `count`), but a scheduled scan should only go *red* on findings meeting the
+ * configured severity — e.g. `fail-level: kev` reports everything yet fails only on
+ * actively-exploited CVEs. Adjudicated findings (`allow.advisories`) never count; malware always
+ * does (via `meetsVulnLevel`). With the default level `cve` this equals the displayed `count`, so
+ * existing repo-mode users see no behavior change. */
+export function repoFailCount(
+  reports: Report[],
+  allowAdvisories: string[],
+  failLevel: string,
+): number {
+  const allow = new Set(allowAdvisories);
+  const isVuln = (f: Finding) => f.verdict === 'malware' || f.verdict === 'cve';
+  let n = 0;
+  for (const r of reports) {
+    for (const f of r.findings) {
+      if (!isVuln(f) || isAdjudicated(f, allow)) continue;
+      if (meetsVulnLevel(f, failLevel)) n += 1;
+    }
+  }
+  return n;
+}
+
 /** Rows shown for introduced-transitive findings before collapsing to "+N more". */
 const TRANSITIVE_ROWS = 10;
 
