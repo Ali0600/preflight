@@ -92,7 +92,11 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   via `report.ts`'s pure `matchesAnyGlob`/single-pass glob tokenizer) and honors policy
   `allow.advisories` **only** (`isAdjudicated`: a fully-accepted cve finding → "✅ Accepted by policy"
   section, listed but not counted; malware never adjudicable) + `runtimes` — NOT the `failOn` rules,
-  which are pr-mode "what a PR introduces" semantics. Writes `preflight.sarif` (uploaded
+  which are pr-mode "what a PR introduces" semantics. **`fail-level` DOES apply in repo mode**
+  (`report.ts`'s pure `repoFailCount`): the issue lists *every* CVE/malware finding (`count`), but
+  the run only goes red on the subset meeting the level (`fail-level: kev` → report all, fail only
+  on actively-exploited) — default `cve` counts all, so existing scans are unchanged; malware
+  always counts, adjudicated never. Writes `preflight.sarif` (uploaded
   to the Security tab). `report.ts` pure/testable; `index.ts` octokit glue. **Committed**
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
   changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
