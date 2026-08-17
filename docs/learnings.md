@@ -331,3 +331,24 @@ trust question ("who can move this label?") answers "me".
 
 **Takeaway:** in CI, a version *label* is a live trust relationship with whoever controls it; a
 *SHA* is a one-time trust decision. Pin third-party actions to SHAs; float only on tags you own.
+
+## `rm -rf node_modules` misses workspace-local `node_modules` — and stale trees lie
+
+Clearing the August 2026 advisory wave, an `overrides` entry for `next → postcss` appeared not to
+work: the lockfile kept showing `packages/web/node_modules/postcss@8.4.31` no matter which override
+form I used (top-level, nested, both). I tried four variants, then even test-upgraded to Next 16 —
+which *also* "failed". The override was fine the whole time. `rm -rf node_modules` at the repo root
+does **not** remove `packages/*/node_modules`, so every install was resolving against a stale
+workspace tree; `npm ls` finally exposed it as `next@15.5.23 invalid: "^16.3.1"` alongside
+`next@16.3.1 extraneous`. One `rm -rf node_modules packages/*/node_modules package-lock.json`
+produced `found 0 vulnerabilities` — and `sharp`, which had looked "dropped by a conflicting
+override", was simply another stale-tree artifact; it resolved to the patched 0.35.3.
+
+**Why it came up:** the 21 GitHub Security-tab alerts (Preflight's own SARIF) after the Aug 2026
+`next`/`postcss`/`undici`/`sharp` advisory wave.
+
+**Takeaway:** in an npm workspaces monorepo, a "clean install" is
+`rm -rf node_modules packages/*/node_modules package-lock.json` — anything less leaves a shadow tree
+that silently answers your questions with old data. When a dependency experiment gives an impossible
+result, run `npm ls <pkg> --all` and look for `invalid`/`extraneous` before concluding the tool is
+broken.
