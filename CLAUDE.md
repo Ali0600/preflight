@@ -147,10 +147,16 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   SvelteKit/Remix/Astro are seeded). Next to add: pip (Django) — and gem (Rails) once a Gemfile parser
   exists, else that data is dead. Be conservative: a false `pinned` is bad advice (we omit bare
   `react`/`svelte` from non-owning sets). Extending it accurately *is* much of the roadmap.
-- **Root `overrides` are security patches for upstream pins** (`tsup→esbuild ^0.28.1`,
-  `next→postcss ^8.5.10` — advisories GHSA-g7r4-m6w7-qqqr / GHSA-qx2v-qp2m-jg93). REMOVE each
-  override once the upstream bumps past it, or it becomes invisible drift. npm quirk: after
-  editing `overrides`, stale locked copies survive `npm install` — a lockfile regen was needed.
+- **Root `overrides` are security patches for upstream pins** — `tsup→esbuild ^0.28.1`,
+  `next→postcss ^8.5.23` (next hard-pins an exact `postcss`), plus flat pins from the Aug-2026
+  advisory wave: `sharp ^0.35.0`, `undici ^6.28.0` (satisfies `@actions/*`'s `^6.23.0`; there is no
+  6.27.1 — the 6.x line jumps to 6.28.0), `nanoid ^3.3.18`, `js-yaml ^4.3.1`,
+  `brace-expansion ^1.1.18`. REMOVE each override once the upstream bumps past it, or it becomes
+  invisible drift (Next 16 pins postcss 8.5.23 natively — drop that one when the web app moves).
+  **npm quirk — a "clean install" must include the workspaces**:
+  `rm -rf node_modules packages/*/node_modules package-lock.json`. Rooting only at the top leaves a
+  shadow `packages/web/node_modules` that makes overrides look broken; `npm ls <pkg> --all` shows it
+  as `invalid`/`extraneous`. Verify with a real `npm audit` (not `npm install`'s summary line).
 - Git: author commits as the user only (no Claude co-author trailer); branch + PR, the user merges.
 
 ## Experience Gained

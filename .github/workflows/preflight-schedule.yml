@@ -29,6 +29,12 @@ jobs:
           # In repo mode the policy contributes only `allow.advisories` — adjudicated advisory ids
           # are listed in the issue but don't keep it red. (No `allow.advisories` entries yet.)
           policy-file: preflight.config.json
+          # Report every finding to the issue + Security tab, but only turn this weekly run RED on
+          # an actively-exploited CVE. An advisory wave in already-merged deps (Aug 2026: 8 packages
+          # / 21 alerts, 0 KEV) would otherwise keep the cron permanently red until upstream ships
+          # fixes — the "trains you to ignore it" antipattern. The PR gate stays strict on anything
+          # NEW; this only tunes the scheduled alarm. Dogfoods the repo-mode fail-level from #61.
+          fail-level: kev
       - name: Upload findings to the Security tab
         if: always() && hashFiles('preflight.sarif') != ''
         uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
