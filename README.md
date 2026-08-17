@@ -40,6 +40,10 @@ jobs:
 
 Add a weekly re-scan (catches CVEs disclosed *after* a dep was merged) with a second workflow using
 `mode: repo` on a cron — see [.github/workflows/preflight-schedule.yml](.github/workflows/preflight-schedule.yml).
+`fail-level` applies there too, and it's worth tuning: a cron gates nothing, so `fail-level: kev`
+reports **every** finding to the tracking issue and the Security tab while only turning the run red
+on a confirmed-exploited CVE — otherwise an advisory wave in already-merged deps keeps the schedule
+permanently red until upstream ships fixes. The PR gate stays strict on anything new.
 
 **Run the CLI locally** — not yet on npm (coming), so run it from a clone:
 
