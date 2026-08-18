@@ -566,6 +566,8 @@ describe('MANIFEST / LOCKFILE discovery patterns', () => {
       'engines/billing/Gemfile.lock',
       'go.mod',
       'services/api/go.mod',
+      'Cargo.lock',
+      'crates/engine/Cargo.lock',
       '.github/workflows/ci.yml',
       '.github/workflows/release.yaml',
     ]) {
@@ -577,6 +579,7 @@ describe('MANIFEST / LOCKFILE discovery patterns', () => {
     for (const p of [
       'Gemfile', // requirements only — no resolved versions to scan (core rejects it too)
       'go.sum', // hashes modules that were never selected — not a graph source
+      'Cargo.toml', // requirements, not resolved versions — the lock is the scannable file
       'package.json.bak',
       'docs/package.json.md',
       'requirements.md',

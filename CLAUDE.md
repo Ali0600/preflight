@@ -23,7 +23,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
     each `Finding`/`Dependency` tagged `direct`) / requirements.txt / **`Gemfile.lock`** /
-    **`go.mod`** / **`.github/workflows/*.yml`**
+    **`go.mod`** / **`Cargo.lock`** / **`.github/workflows/*.yml`**
     (ecosystem `actions`: `uses:` entries → deps named `owner/repo`, `mutableRef` when the ref
     isn't a full SHA, `version` only for exact `vX.Y.Z` refs; matched on the whole path so a random
     `foo.yml` never parses). OSV scans the whole graph; `--latest`/`--health` apply to direct deps
@@ -52,7 +52,14 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     normalising would only risk breaking a match). Go **stdlib** comes from a `toolchain` directive
     ONLY — the bare `go` directive is a minimum that libraries hold low deliberately, so inferring
     the build version from it manufactures CVEs; when it's absent the ledger says why. Full fork +
-    rejected alternatives: `docs/DECISIONS.md`.
+    rejected alternatives: `docs/DECISIONS.md`. **`parseCargoLock`** is a purpose-built TOML
+    *subset* reader (Cargo emits only `[[package]]`, `key = "str"`, and a `dependencies` array;
+    core ships one runtime dep and adding a TOML parser for this would be the second) — handles
+    formats v1–v4, both the block and inline `dependencies` forms, and the legacy qualified entry
+    `"name ver (source)"`. Crates with **no `source`** are workspace-local: excluded from advisory
+    matching (an in-repo `utils` must not inherit crates.io `utils`) but their edges are what
+    define `direct`; `git+` sources ARE scanned. Duplicate crate versions are kept separately
+    (two majors legitimately coexist in a Rust build).
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as
     malicious). **GitHub Actions is a separate path**: OSV does NOT evaluate versioned queries for
     that ecosystem (verified live 2026-07-09 — known-affected versions return `{}`), so

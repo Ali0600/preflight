@@ -20,6 +20,8 @@ const OSV_ECOSYSTEM: Record<Ecosystem, string> = {
   // Same live check: gin@1.9.0 -> 2 advisories, golang.org/x/net@v0.7.0 -> 23,
   // stdlib@1.21.0 -> 75, and a patched release -> 0.
   Go: 'Go',
+  // Same live check: openssl@0.10.0 -> 18 advisories, smallvec@0.6.9 -> 9, serde@1.0.200 -> 0.
+  'crates.io': 'crates.io',
 };
 
 // OSV's `querybatch` rejects very large batches with a 400 (an undocumented ~1000-query practical

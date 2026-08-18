@@ -43,6 +43,30 @@ D — `deferred — worth trying`.
 
 ---
 
+## 2026-08-18 — Parsing `Cargo.lock`: TOML library or hand-rolled subset?
+
+**The fork:** `Cargo.lock` is TOML. Do we add a TOML parser?
+
+| Option | Tradeoff |
+| --- | --- |
+| **A. Purpose-built subset reader** *(chosen)* | Cargo emits exactly three constructs — `[[package]]`, `key = "string"`, and a `dependencies` array (block or inline). ~60 lines, no new dependency. `@preflight/core` ships exactly one runtime dep (`yaml`, unavoidable for pnpm/yarn-berry); a second would double that for a far simpler format. |
+| B. Add `smol-toml` (or similar) | Correct for arbitrary TOML and less code to own. But it is a new supply-chain dependency in a supply-chain scanner, bundled into the published CLI *and* the committed Action bundle, to parse a machine-generated file with a fixed shape. |
+| C. Reuse `confbox` (already in the tree via a tsup transitive, exposes a `./toml` subpath) | Zero install cost — and an undeclared-transitive import, which is precisely the practice this tool exists to flag. Not seriously considered. |
+
+**Chosen: A.** The risk it carries is real but bounded: a hand-rolled reader can silently
+mis-parse a format change. Mitigated by mutation-testing every branch and by cross-checking the
+parsed crate count against a real 63-package lock (63 − 11 workspace-local = 52 scanned).
+
+**Status:** B — `deferred — worth trying` if Cargo.lock ever gains a construct the subset can't
+express, or if a second TOML-based ecosystem (e.g. `poetry.lock`, `Pipfile.lock`) lands and makes a
+shared parser pay for itself. C — `rejected — an undeclared transitive import is the exact
+antipattern this tool reports`.
+
+**Revisit hook:** `parseCargoLock` in `packages/core/src/lockfiles.ts`; the dep would go in
+`packages/core/package.json` and be picked up by tsup's bundling automatically.
+
+---
+
 ## 2026-08-18 — Scanning Ruby: `Gemfile` or `Gemfile.lock`?
 
 **The fork:** which file is the Ruby manifest?

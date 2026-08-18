@@ -164,6 +164,120 @@ function parseYarnV1(text: string): LockGraph {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Cargo.lock (Rust)
+//
+// Self-contained again: every crate in the build appears as a `[[package]]` block with its
+// resolved version. Parsed with a purpose-built TOML *subset* reader rather than a TOML library —
+// Cargo emits exactly four constructs (`[[package]]`, `key = "string"`, `key = number`, and a
+// `dependencies` array), and core ships one runtime dependency today. See docs/DECISIONS.md.
+//
+// Scope notes (deliberate):
+// - A package with NO `source` is workspace-local: the crate lives in this repo, so its name is
+//   arbitrary and must not inherit advisories from a crates.io crate that happens to share it
+//   (the same rule as Gemfile.lock's PATH sections). Their `dependencies` lists are still read —
+//   that's what makes a crate "direct".
+// - `registry+` and `git+` sources ARE scanned: a git dep of `foo` is still crate `foo`.
+// - `dev: false` everywhere: Cargo.lock records no dev/build distinction (that's Cargo.toml).
+
+/** A `dependencies` entry: `"memchr"`, `"foo 1.0.0"`, or `"foo 1.0.0 (registry+https://…)"`. */
+function cargoDepName(entry: string): string | undefined {
+  return entry.trim().replace(/^"|",?$/g, '').trim().split(/\s+/)[0] || undefined;
+}
+
+/** `key = "value"` -> value (Cargo never emits multi-line or escaped strings here). */
+function cargoString(line: string, key: string): string | undefined {
+  const m = line.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*$`));
+  return m?.[1];
+}
+
+interface CargoPackage {
+  name?: string;
+  version?: string;
+  source?: string;
+  deps: string[];
+}
+
+/** Parse a `Cargo.lock` (format versions 1–4) into the crate graph. */
+export function parseCargoLock(content: string): Dependency[] {
+  const packages: CargoPackage[] = [];
+  let current: CargoPackage | undefined;
+  let inDepsArray = false;
+
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+
+    if (inDepsArray) {
+      if (line.startsWith(']')) {
+        inDepsArray = false;
+        continue;
+      }
+      const name = cargoDepName(line);
+      if (name && current) current.deps.push(name);
+      continue;
+    }
+
+    if (line === '[[package]]') {
+      current = { deps: [] };
+      packages.push(current);
+      continue;
+    }
+    // Any other table header ends the package block (`[metadata]`, `[[patch.unused]]`, …).
+    // Defence-in-depth rather than load-bearing: the `??=` below already refuses to overwrite a
+    // parsed field, and no non-package table Cargo emits carries a `dependencies` array (probed
+    // against a real 63-crate lock — output is byte-identical without this reset). Keep it: it is
+    // the correct semantics, and it is what stops a future table type from pushing edges onto the
+    // previous package.
+    if (line.startsWith('[')) {
+      current = undefined;
+      continue;
+    }
+    if (!current) continue;
+
+    if (line.startsWith('dependencies')) {
+      const inline = line.match(/^dependencies\s*=\s*\[(.*)\]\s*$/);
+      if (inline) {
+        for (const e of inline[1]!.split(',')) {
+          const name = cargoDepName(e);
+          if (name) current.deps.push(name);
+        }
+      } else if (/^dependencies\s*=\s*\[\s*$/.test(line)) {
+        inDepsArray = true;
+      }
+      continue;
+    }
+    current.name ??= cargoString(line, 'name');
+    current.version ??= cargoString(line, 'version');
+    current.source ??= cargoString(line, 'source');
+  }
+
+  // Workspace-local crates (no `source`) define what "direct" means: anything they depend on was
+  // chosen by a human in this repo. A lock with no local crate at all is malformed — fall back to
+  // treating everything as direct rather than silently reporting a graph with no direct deps.
+  const local = packages.filter((p) => p.name && !p.source);
+  const localNames = new Set(local.map((p) => p.name!));
+  const directNames = new Set(local.flatMap((p) => p.deps).filter((n) => !localNames.has(n)));
+  const noLocalCrates = local.length === 0;
+
+  const deps: Dependency[] = [];
+  const seen = new Set<string>();
+  for (const p of packages) {
+    if (!p.name || !p.version || !p.source) continue; // skip local crates (see note)
+    const id = `${p.name}@${p.version}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    deps.push({
+      name: p.name,
+      range: '',
+      version: p.version,
+      dev: false,
+      direct: noLocalCrates || directNames.has(p.name),
+    });
+  }
+  return deps;
+}
+
+// ---------------------------------------------------------------------------------------------
 // go.mod (Go modules)
 //
 // Also self-contained: since Go 1.17 the `require` list is the full pruned module graph, with

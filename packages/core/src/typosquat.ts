@@ -40,6 +40,7 @@ const POPULAR: Record<Ecosystem, string[]> = {
   // Empty for the same reason as RubyGems — and Go module paths are host-qualified
   // (`github.com/owner/repo`), so a lookalike is an owner/repo edit, not a bare-name one.
   Go: [],
+  'crates.io': [],
 };
 
 /** Normalize separators so `cross_env`/`cross.env` compare against `cross-env`. Scopes are kept:
@@ -55,6 +56,7 @@ const NORM: Record<Ecosystem, Set<string>> = {
   actions: new Set(POPULAR.actions.map(normalize)),
   RubyGems: new Set(POPULAR.RubyGems.map(normalize)),
   Go: new Set(POPULAR.Go.map(normalize)),
+  'crates.io': new Set(POPULAR['crates.io'].map(normalize)),
 };
 
 /** True iff the Damerau-Levenshtein distance between a and b is exactly 1 (incl. one transposition). */
