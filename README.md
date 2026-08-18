@@ -341,6 +341,25 @@ re-runs instant. A *failed* fetch is never cached — if a source is unreachable
   **pnpm/yarn lockfile parsers** (full transitive graphs for all three JS package managers), and
   **GitHub Actions workflow scanning** — including local advisory-range evaluation after a
   known-positive probe proved OSV doesn't version-match that ecosystem server-side.
+- Extended the engine to **five language ecosystems** by writing lockfile/manifest parsers from the
+  format specifications — `Gemfile.lock` (Bundler), `go.mod` (Go modules), and `Cargo.lock` (Cargo
+  formats v1–v4, via a purpose-built TOML-subset reader rather than a new dependency) — each
+  validated against real open-source projects at two points in their history to prove the scan both
+  finds known vulnerabilities and stays clean when it should.
+- Made deliberate, documented **precision-vs-coverage calls** where a manifest can't answer the
+  question: local/path-sourced packages are excluded from advisory matching so an in-repo module
+  never inherits a public package's CVEs, and the Go standard library is scanned only from a
+  prescriptive `toolchain` directive — never inferred from a minimum-version `go` directive, which
+  would report compatibility-minded libraries as carrying an entire CVE backlog. Gaps are announced
+  in a per-run **data-source ledger** rather than passing silently as coverage.
+- Built a **mutation-testing harness** to prove every new check can actually fail — sabotage each
+  branch, confirm the suite catches it, restore from an in-memory snapshot with a checksum. It
+  surfaced four genuinely untested code paths, and one defect in the harness itself (an ambiguous
+  search pattern was sabotaging a different function than the one under test).
+- Curated an evidence-backed **known-bad version pair** registry for breakage no metadata can
+  express — e.g. `@types/react@19` ships **no peer dependency at all**, so package managers and
+  auto-updaters place it beside React 18 without complaint and the build stops compiling —
+  surfaced in scans and enforceable as a policy rule.
 
 ## License
 [MIT](LICENSE).
