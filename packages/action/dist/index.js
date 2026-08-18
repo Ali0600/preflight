@@ -31688,6 +31688,84 @@ function parseYarnV1(text) {
   }
   return { all, bySpec };
 }
+function toolchainVersion(raw) {
+  return raw.trim().match(/^go(\d+(?:\.\d+)*)$/)?.[1];
+}
+function parseRequire(body) {
+  const indirect = /\/\/\s*indirect\b/.test(body);
+  const code = body.split("//")[0]?.trim() ?? "";
+  const m = code.match(/^(\S+)\s+(\S+)$/);
+  if (!m) return void 0;
+  return { name: m[1], range: m[2], version: m[2], dev: false, direct: !indirect };
+}
+function parseGoMod(content) {
+  const deps = /* @__PURE__ */ new Map();
+  const replacements = /* @__PURE__ */ new Map();
+  let toolchain;
+  let block;
+  const addRequire = (body) => {
+    const dep = parseRequire(body);
+    if (dep && !deps.has(dep.name)) deps.set(dep.name, dep);
+  };
+  const addReplace = (body) => {
+    const [left, right] = body.split("=>");
+    if (!left || right === void 0) return;
+    const from = left.trim().split(/\s+/)[0];
+    if (!from) return;
+    const to = right.trim().split(/\s+/);
+    const target = to[0];
+    if (!target) return;
+    if (/^\.{0,2}\//.test(target)) {
+      replacements.set(from, void 0);
+      return;
+    }
+    const version = to[1];
+    if (!version) return;
+    replacements.set(from, { name: target, version });
+  };
+  for (const raw of content.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("//")) continue;
+    if (block) {
+      if (trimmed === ")") {
+        block = void 0;
+        continue;
+      }
+      if (block === "require") addRequire(trimmed);
+      else if (block === "replace") addReplace(trimmed);
+      continue;
+    }
+    const open2 = trimmed.match(/^(require|replace|exclude|retract)\s*\($/);
+    if (open2) {
+      const kind = open2[1];
+      block = kind === "require" ? "require" : kind === "replace" ? "replace" : "other";
+      continue;
+    }
+    if (trimmed.startsWith("require ")) addRequire(trimmed.slice("require ".length));
+    else if (trimmed.startsWith("replace ")) addReplace(trimmed.slice("replace ".length));
+    else if (trimmed.startsWith("toolchain ")) toolchain = toolchainVersion(trimmed.slice("toolchain ".length));
+  }
+  for (const [from, to] of replacements) {
+    const original = deps.get(from);
+    if (!original) continue;
+    deps.delete(from);
+    if (!to) continue;
+    if (deps.has(to.name)) continue;
+    deps.set(to.name, {
+      name: to.name,
+      range: to.version,
+      version: to.version,
+      dev: false,
+      direct: original.direct
+    });
+  }
+  const out = [...deps.values()];
+  if (toolchain) {
+    out.unshift({ name: "stdlib", range: toolchain, version: toolchain, dev: false, direct: true });
+  }
+  return out;
+}
 var GEM_SOURCE_SECTIONS = /* @__PURE__ */ new Set(["GEM", "GIT", "PATH"]);
 function gemVersion(raw) {
   const dash = raw.indexOf("-");
@@ -31771,18 +31849,20 @@ function ecosystemFor(path) {
   if (f === "package.json") return "npm";
   if (f.startsWith("requirements") && f.endsWith(".txt")) return "PyPI";
   if (f === "gemfile.lock") return "RubyGems";
+  if (f === "go.mod") return "Go";
   throw new Error(
-    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, or .github/workflows/*.yml)`
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, go.mod, or .github/workflows/*.yml)`
   );
 }
-var SELF_LOCKED = /* @__PURE__ */ new Set(["RubyGems"]);
+var SELF_LOCKED = /* @__PURE__ */ new Set(["RubyGems", "Go"]);
 function parseManifestContent(filename, content) {
   const ecosystem = ecosystemFor(filename);
   const parse4 = {
     npm: parseNpm,
     PyPI: parsePip,
     actions: parseWorkflow,
-    RubyGems: parseGemfileLock
+    RubyGems: parseGemfileLock,
+    Go: parseGoMod
   };
   const dependencies = parse4[ecosystem](content);
   return {
@@ -32175,7 +32255,10 @@ var OSV_ECOSYSTEM = {
   // Verified live 2026-08-18 that OSV DOES evaluate versioned querybatch queries here (unlike
   // "GitHub Actions", which needs the local range-matching path below): rails@7.0.0 -> 1
   // advisory, nokogiri@1.13.0 -> 28, and a known-clean version -> 0.
-  RubyGems: "RubyGems"
+  RubyGems: "RubyGems",
+  // Same live check: gin@1.9.0 -> 2 advisories, golang.org/x/net@v0.7.0 -> 23,
+  // stdlib@1.21.0 -> 75, and a patched release -> 0.
+  Go: "Go"
 };
 var OSV_BATCH = 1e3;
 function chunk(arr, size) {
@@ -32669,7 +32752,10 @@ var POPULAR = {
   // worse than none — a popular gem missing from it can't be squatted-against, while a
   // careless entry turns a legitimate gem into a false warning. Populate it (from a real
   // rubygems.org download ranking) in the same change that enables it, not before.
-  RubyGems: []
+  RubyGems: [],
+  // Empty for the same reason as RubyGems — and Go module paths are host-qualified
+  // (`github.com/owner/repo`), so a lookalike is an owner/repo edit, not a bare-name one.
+  Go: []
 };
 function normalize(name) {
   return name.replace(/[_.]/g, "-").toLowerCase();
@@ -32678,7 +32764,8 @@ var NORM = {
   npm: new Set(POPULAR.npm.map(normalize)),
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
   actions: new Set(POPULAR.actions.map(normalize)),
-  RubyGems: new Set(POPULAR.RubyGems.map(normalize))
+  RubyGems: new Set(POPULAR.RubyGems.map(normalize)),
+  Go: new Set(POPULAR.Go.map(normalize))
 };
 function isOneEditApart(a, b) {
   if (a === b || Math.abs(a.length - b.length) > 1) return false;
@@ -33769,6 +33856,14 @@ function describeSources(args) {
       status: "ok",
       detail: pinned ? `${pinned} of ${findings.length} package(s) are framework-coordinated` : `no framework-coordinated packages among ${findings.length}`
     });
+    if (ecosystem === "Go") {
+      const stdlib = findings.find((f) => f.name === "stdlib");
+      sources.push({
+        name: "Go standard library",
+        status: stdlib ? "ok" : "skipped",
+        detail: stdlib ? `stdlib ${stdlib.version} (from the toolchain directive) \u2192 ${stdlib.vulns.length} advisor${stdlib.vulns.length === 1 ? "y" : "ies"}` : "no toolchain directive \u2014 the bare `go` directive is a minimum, not the build version, so stdlib advisories were not evaluated (add `toolchain goX.Y.Z`, or run govulncheck)"
+      });
+    }
     sources.push({
       name: `${ecosystem} registry`,
       status: "skipped",
@@ -33933,7 +34028,7 @@ function renderPolicySection(violations, suppressed = []) {
   }
   return lines.join("\n");
 }
-var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 var LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 var MARKER = "<!-- preflight-action -->";
 var ISSUE_MARKER = "<!-- preflight-scheduled -->";

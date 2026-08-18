@@ -23,7 +23,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
     each `Finding`/`Dependency` tagged `direct`) / requirements.txt / **`Gemfile.lock`** /
-    **`.github/workflows/*.yml`**
+    **`go.mod`** / **`.github/workflows/*.yml`**
     (ecosystem `actions`: `uses:` entries → deps named `owner/repo`, `mutableRef` when the ref
     isn't a full SHA, `version` only for exact `vX.Y.Z` refs; matched on the whole path so a random
     `foo.yml` never parses). OSV scans the whole graph; `--latest`/`--health` apply to direct deps
@@ -43,7 +43,16 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     would falsely inherit a real gem's advisories), `GIT` sections kept (a fork of a real gem),
     platform suffixes stripped (`1.13.0-x86_64-linux` → `1.13.0`). The **anchored** spec regex is
     the load-bearing filter — the section allowlist and `inSpecs` are redundant defence-in-depth
-    (probed: mutating either alone changes nothing).
+    (probed: mutating either alone changes nothing). **`parseGoMod`** is self-locked too (go.mod
+    since 1.17 is the full pruned graph; **`go.sum` is NOT a graph source** — it hashes candidates
+    that were never selected). It applies `replace` (module→module scans the fork; module→local
+    path drops the entry, and a replace whose left side isn't required is a no-op per the module
+    ref), ignores `exclude`/`retract` in both single-line AND block form, and passes versions
+    through **verbatim** (`v` prefix + `+incompatible` — OSV accepts every form, verified live, so
+    normalising would only risk breaking a match). Go **stdlib** comes from a `toolchain` directive
+    ONLY — the bare `go` directive is a minimum that libraries hold low deliberately, so inferring
+    the build version from it manufactures CVEs; when it's absent the ledger says why. Full fork +
+    rejected alternatives: `docs/DECISIONS.md`.
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as
     malicious). **GitHub Actions is a separate path**: OSV does NOT evaluate versioned queries for
     that ecosystem (verified live 2026-07-09 — known-affected versions return `{}`), so

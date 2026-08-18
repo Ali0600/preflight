@@ -72,7 +72,7 @@ export async function analyzeContent(
 /** Which uploaded file to treat as THE manifest in `analyzeFiles`. Workflow files are excluded
  * on purpose: a caller posting a repo's files should get its package graph scanned, not one of
  * its CI workflows (scan those by pointing `analyze` straight at the path). */
-const SCANNABLE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$/i;
+const SCANNABLE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod)$/i;
 
 /**
  * Analyze an in-memory set of manifest files. Writes them to a throwaway temp dir so the npm
@@ -100,7 +100,7 @@ export async function analyzeFiles(
       writeFileSync(p, content);
       if (SCANNABLE_MANIFEST.test(name)) manifestPath ??= p;
     }
-    if (!manifestPath) throw new Error('No package.json, requirements*.txt or Gemfile.lock among the files');
+    if (!manifestPath) throw new Error('No package.json, requirements*.txt, Gemfile.lock or go.mod among the files');
     return await analyze(manifestPath, opts);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -368,6 +368,20 @@ function describeSources(args: {
         ? `${pinned} of ${findings.length} package(s) are framework-coordinated`
         : `no framework-coordinated packages among ${findings.length}`,
     });
+    // Go's standard library is scanned only when a `toolchain` directive names the toolchain that
+    // will build the module. Say so when it doesn't: a bare `go` directive is a minimum (libraries
+    // hold it low on purpose), so inferring the build version from it would invent CVEs — but
+    // silently checking nothing would read as "stdlib is clean".
+    if (ecosystem === 'Go') {
+      const stdlib = findings.find((f) => f.name === 'stdlib');
+      sources.push({
+        name: 'Go standard library',
+        status: stdlib ? 'ok' : 'skipped',
+        detail: stdlib
+          ? `stdlib ${stdlib.version} (from the toolchain directive) → ${stdlib.vulns.length} advisor${stdlib.vulns.length === 1 ? 'y' : 'ies'}`
+          : 'no toolchain directive — the bare `go` directive is a minimum, not the build version, so stdlib advisories were not evaluated (add `toolchain goX.Y.Z`, or run govulncheck)',
+      });
+    }
     sources.push({
       name: `${ecosystem} registry`,
       status: 'skipped',

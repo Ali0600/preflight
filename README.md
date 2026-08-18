@@ -49,25 +49,31 @@ permanently red until upstream ships fixes. The PR gate stays strict on anything
 
 ```bash
 git clone https://github.com/Ali0600/preflight && cd preflight && npm install
-npm run check -- path/to/package.json        # or requirements*.txt, or Gemfile.lock
+npm run check -- path/to/package.json        # or requirements*.txt, Gemfile.lock, go.mod
 ```
 
 **Or paste a manifest in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
 no install, no account.
 
 **Supported manifests:** `package.json` (npm), `requirements*.txt` (pip), `Gemfile.lock`
-(RubyGems), and `.github/workflows/*.yml` (GitHub Actions).
+(RubyGems), `go.mod` (Go), and `.github/workflows/*.yml` (GitHub Actions).
 
 > **Coverage note:** JavaScript scans always include the full lockfile tree —
 > **`package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`** (classic v1 and berry) are all parsed.
 > Ruby is scanned straight from `Gemfile.lock`, which already carries the resolved version of
 > every installed gem (point Preflight at the *lock*, not the `Gemfile` — only the lock has
-> versions to check). pip has no standard lockfile, so a `requirements.txt` scan covers exactly
+> versions to check). Go is scanned from `go.mod`, which since Go 1.17 lists the full pruned
+> module graph (`go.sum` is deliberately **not** used — it hashes candidate modules that were
+> never selected, so scanning it reports versions your build doesn't use). The Go **standard
+> library** is checked when a `toolchain` directive names the toolchain that will build the
+> module; a bare `go` directive is only a *minimum*, so inferring the build version from it
+> would report every compatibility-minded library as carrying the whole stdlib CVE backlog —
+> the scan says so explicitly instead of guessing. pip has no standard lockfile, so a `requirements.txt` scan covers exactly
 > the versions listed in it; for transitive coverage, scan a fully-pinned file (`pip freeze` or
 > pip-tools' `requirements.txt` output).
 
 ## Highlights
-- **Supply-chain pre-flight engine** — parses npm/pip/RubyGems manifests, batches queries to the
+- **Supply-chain pre-flight engine** — parses npm/pip/RubyGems/Go manifests, batches queries to the
   OSV vulnerability database, and classifies each dependency as `safe` / `pinned` / `cve` / `stale`.
   Keyless, deterministic, and cached on disk (24h) to respect rate limits.
 - **Framework-lockstep detection** — a data-driven registry that flags packages a framework pins
@@ -127,7 +133,7 @@ no install, no account.
 ## Quickstart
 ```bash
 npm install
-npm run check -- path/to/package.json      # or requirements*.txt, or Gemfile.lock
+npm run check -- path/to/package.json      # or requirements*.txt, Gemfile.lock, go.mod
 npm run check -- examples/requirements.txt --latest   # add latest-version + staleness
 npm test                                    # vitest
 npm run build                               # tsup → standalone dist (publishable CLI)

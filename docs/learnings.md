@@ -387,3 +387,39 @@ asserting `frameworkSet('rails')` is `undefined` is what surfaced it.
 name needs an ecosystem/namespace field the moment a second namespace exists — and grep every
 consumer, because the dangerous one is usually not the lookup you were editing. A test that breaks
 when you add data is doing its job: read what it was really asserting before updating it.
+
+## A "minimum version" declaration is not a "version in use" — don't scan it as one
+
+`go.mod`'s `go` directive looks like the obvious source for "which Go stdlib should we check for
+CVEs?" It isn't: it declares a *minimum*, and libraries deliberately hold it low so they stay
+usable by older consumers. Scanning it as the build version would have reported every
+compatibility-minded Go library as carrying the entire stdlib CVE backlog — `go 1.21.0` alone
+matches 75 advisories. The `toolchain` directive *is* prescriptive (it names the toolchain that
+will be used), so that's what we scan; when it's absent the data-source ledger states that stdlib
+went unchecked and why. Worth knowing: OSV-Scanner solves the same problem by running
+`go env GOVERSION`, which answers for the *scanner's* machine — fine locally, meaningless when
+scanning someone else's repo in CI, and a documented failure when Go isn't installed in the
+container.
+
+**Why it came up:** adding `go.mod` support and having to decide what the Go stdlib version is.
+
+**Takeaway:** before treating a declared version as a fact about what runs, ask whether the field
+is a floor, a ceiling, or an exact pin — floors (`>=`, "minimum required", "engines") describe what
+is *supported*, not what is *installed*. If only a floor is available, report the gap out loud
+rather than inventing a value: an unchecked area you name is useful; one you paper over is a lie.
+
+## Scanning the wrong file can be worse than scanning nothing
+
+Go has two candidate files. `go.mod` lists the modules actually selected for the build; `go.sum`
+holds hashes for modules that were *considered*, including versions that lost minimal-version
+selection and are never compiled. `go.sum` is bigger and looks more thorough, which is exactly the
+trap — scanning it reports CVEs for versions the build does not contain. Same shape as choosing
+`Gemfile.lock` over `Gemfile`, but inverted: there the *smaller* file was the wrong one because it
+lacked resolved versions.
+
+**Why it came up:** picking the input file for each new ecosystem parser.
+
+**Takeaway:** for any new ecosystem, ask which artifact records *what actually got installed* —
+not which one is largest, most authoritative-sounding, or most often committed. A file listing
+candidates produces false positives; a file listing requirements produces silent misses. Both read
+as a successful scan.

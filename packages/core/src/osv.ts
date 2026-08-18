@@ -17,6 +17,9 @@ const OSV_ECOSYSTEM: Record<Ecosystem, string> = {
   // "GitHub Actions", which needs the local range-matching path below): rails@7.0.0 -> 1
   // advisory, nokogiri@1.13.0 -> 28, and a known-clean version -> 0.
   RubyGems: 'RubyGems',
+  // Same live check: gin@1.9.0 -> 2 advisories, golang.org/x/net@v0.7.0 -> 23,
+  // stdlib@1.21.0 -> 75, and a patched release -> 0.
+  Go: 'Go',
 };
 
 // OSV's `querybatch` rejects very large batches with a 400 (an undocumented ~1000-query practical

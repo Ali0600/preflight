@@ -119,6 +119,65 @@ describe('parseManifest — RubyGems (Gemfile.lock)', () => {
   });
 });
 
+describe('parseManifest — Go (go.mod)', () => {
+  const m = parseManifest(fixture('go/go.mod'));
+  const dep = (name: string) => m.dependencies.find((d) => d.name === name);
+
+  it('reads the pruned module graph, single-line and block requires alike', () => {
+    expect(m.ecosystem).toBe('Go');
+    expect(m.lockfile).toBe(true); // since Go 1.17 go.mod IS the full graph
+    expect(dep('github.com/gin-gonic/gin')?.version).toBe('v1.9.0'); // single-line require
+    expect(dep('golang.org/x/net')?.version).toBe('v0.7.0'); // block require
+  });
+
+  it('passes versions through verbatim (v prefix, +incompatible)', () => {
+    // Verified live that OSV accepts every form — normalising would risk breaking a match.
+    expect(dep('github.com/dgrijalva/jwt-go')?.version).toBe('v3.2.0+incompatible');
+  });
+
+  it('tags // indirect modules transitive', () => {
+    expect(dep('github.com/gin-gonic/gin')?.direct).toBe(true);
+    expect(dep('golang.org/x/net')?.direct).toBe(false);
+    expect(dep('golang.org/x/text')?.direct).toBe(false);
+  });
+
+  it('scans the replacement module, not the replaced one', () => {
+    // `replace upstream/lib => example/lib-fork v1.4.2` — the fork is the code that gets built.
+    expect(dep('github.com/upstream/lib')).toBeUndefined();
+    expect(dep('github.com/example/lib-fork')).toMatchObject({ version: 'v1.4.2', direct: true });
+  });
+
+  it('drops a module replaced by a local path', () => {
+    // Local code in this repo: its import path must not inherit a real module's advisories.
+    expect(dep('github.com/example/internal')).toBeUndefined();
+  });
+
+  it('ignores a replace whose left side is not required, plus exclude/retract', () => {
+    // "A replace directive has no effect if the module version on the left side is not required."
+    expect(dep('github.com/some/other')).toBeUndefined();
+    expect(dep('github.com/never/required')).toBeUndefined();
+    // Excluded modules are ones the build deliberately avoids — in BOTH the single-line and the
+    // block form (only the block form can be mistaken for a require list).
+    expect(dep('github.com/bad/pkg')).toBeUndefined();
+    expect(dep('github.com/worse/pkg')).toBeUndefined();
+    expect(dep('github.com/awful/pkg')).toBeUndefined();
+    // retract entries are about THIS module's own releases, not dependencies.
+    expect(m.dependencies.some((d) => d.name.startsWith('v0.'))).toBe(false);
+  });
+
+  it('reports the stdlib from a toolchain directive', () => {
+    expect(dep('stdlib')).toMatchObject({ version: '1.21.0', direct: true });
+  });
+
+  it('does NOT infer stdlib from a bare go directive', () => {
+    // The `go` line is a MINIMUM — libraries hold it low on purpose for compatibility, so
+    // treating it as the build version would invent the whole stdlib CVE backlog for them.
+    const bare = parseManifestContent('go.mod', 'module x\n\ngo 1.21.0\n\nrequire a/b v1.0.0\n');
+    expect(bare.dependencies.find((d) => d.name === 'stdlib')).toBeUndefined();
+    expect(bare.dependencies).toHaveLength(1);
+  });
+});
+
 describe('parseManifest — unsupported', () => {
   it('throws on an unknown manifest', () => {
     // A bare Gemfile carries requirements but no resolved versions — only the lock is scannable.
