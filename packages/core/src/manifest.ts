@@ -3,23 +3,30 @@ import { basename, dirname, join } from 'node:path';
 
 import { parse as parseYaml } from 'yaml';
 
-import { enumeratePnpmGraph, enumerateYarnGraph } from './lockfiles';
+import { enumeratePnpmGraph, enumerateYarnGraph, parseGemfileLock } from './lockfiles';
 import type { Dependency, Ecosystem, Manifest } from './types';
 
 /** A GitHub Actions workflow file: `*.yml`/`*.yaml` under `.github/workflows/`. Matched on the
  * whole path (not just the basename) so an arbitrary `foo.yml` never parses as a workflow. */
 export const WORKFLOW_PATH = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 
-/** Pick the parser for a manifest path, or throw if it isn't one we support. */
+/** Pick the parser for a manifest path, or throw if it isn't one we support.
+ * Note `Gemfile.lock` is matched, but a bare `Gemfile` is NOT: the Gemfile carries only
+ * requirements, while the lock carries resolved versions — which is what OSV needs. */
 function ecosystemFor(path: string): Ecosystem {
   if (WORKFLOW_PATH.test(path)) return 'actions';
   const f = basename(path).toLowerCase();
   if (f === 'package.json') return 'npm';
   if (f.startsWith('requirements') && f.endsWith('.txt')) return 'PyPI';
+  if (f === 'gemfile.lock') return 'RubyGems';
   throw new Error(
-    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, or .github/workflows/*.yml)`,
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, or .github/workflows/*.yml)`,
   );
 }
+
+/** Ecosystems whose manifest file IS the lockfile — the text alone yields resolved versions for
+ * the whole graph, so there's no sibling lockfile to look for and `lockfile` is always true. */
+const SELF_LOCKED: ReadonlySet<Ecosystem> = new Set<Ecosystem>(['RubyGems']);
 
 /**
  * Parse manifest *text* (no filesystem access) into a flat dep list — used to read a base-ref
@@ -29,10 +36,21 @@ function ecosystemFor(path: string): Ecosystem {
  */
 export function parseManifestContent(filename: string, content: string): Manifest {
   const ecosystem = ecosystemFor(filename);
-  const dependencies =
-    ecosystem === 'npm' ? parseNpm(content) : ecosystem === 'PyPI' ? parsePip(content) : parseWorkflow(content);
-  // Content-only parsing never sees a lockfile; `parseManifest` upgrades this when one exists.
-  return { ecosystem, path: filename, dependencies, lockfile: ecosystem === 'npm' ? false : undefined };
+  const parse: Record<Ecosystem, (text: string) => Dependency[]> = {
+    npm: parseNpm,
+    PyPI: parsePip,
+    actions: parseWorkflow,
+    RubyGems: parseGemfileLock,
+  };
+  const dependencies = parse[ecosystem](content);
+  // Content-only parsing never sees a *sibling* lockfile (`parseManifest` upgrades npm when one
+  // exists) — but a self-locked manifest carries the resolved graph in the text itself.
+  return {
+    ecosystem,
+    path: filename,
+    dependencies,
+    lockfile: SELF_LOCKED.has(ecosystem) ? true : ecosystem === 'npm' ? false : undefined,
+  };
 }
 
 /** Lockfiles we can expand into the full installed graph, in precedence order (a repo that

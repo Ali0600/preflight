@@ -49,24 +49,31 @@ permanently red until upstream ships fixes. The PR gate stays strict on anything
 
 ```bash
 git clone https://github.com/Ali0600/preflight && cd preflight && npm install
-npm run check -- path/to/package.json        # or a requirements*.txt
+npm run check -- path/to/package.json        # or requirements*.txt, or Gemfile.lock
 ```
 
 **Or paste a manifest in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
 no install, no account.
 
-> **Python note:** pip has no standard lockfile, so a `requirements.txt` scan covers exactly the
-> versions listed in it. For transitive coverage, scan a fully-pinned file (`pip freeze` or
-> pip-tools' `requirements.txt` output). JavaScript scans always include the full lockfile tree —
+**Supported manifests:** `package.json` (npm), `requirements*.txt` (pip), `Gemfile.lock`
+(RubyGems), and `.github/workflows/*.yml` (GitHub Actions).
+
+> **Coverage note:** JavaScript scans always include the full lockfile tree —
 > **`package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`** (classic v1 and berry) are all parsed.
+> Ruby is scanned straight from `Gemfile.lock`, which already carries the resolved version of
+> every installed gem (point Preflight at the *lock*, not the `Gemfile` — only the lock has
+> versions to check). pip has no standard lockfile, so a `requirements.txt` scan covers exactly
+> the versions listed in it; for transitive coverage, scan a fully-pinned file (`pip freeze` or
+> pip-tools' `requirements.txt` output).
 
 ## Highlights
-- **Supply-chain pre-flight engine** — parses npm/pip manifests, batches queries to the OSV
-  vulnerability database, and classifies each dependency as `safe` / `pinned` / `cve` / `stale`.
+- **Supply-chain pre-flight engine** — parses npm/pip/RubyGems manifests, batches queries to the
+  OSV vulnerability database, and classifies each dependency as `safe` / `pinned` / `cve` / `stale`.
   Keyless, deterministic, and cached on disk (24h) to respect rate limits.
 - **Framework-lockstep detection** — a data-driven registry that flags packages a framework pins
-  as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro), the failure mode generic
-  auto-updaters (Dependabot/Renovate) can't see — with the exact upgrade command to use instead.
+  as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro, and **Rails**, whose gem
+  declares all 12 components at `= X.Y.Z`), the failure mode generic auto-updaters
+  (Dependabot/Renovate) can't see — with the exact upgrade command to use instead.
 - **Severity + health enrichment** — maps GHSA labels and computes CVSS v3 base scores for
   advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev
   **plus build provenance**: a 🔏 badge when the version ships a *verified* attestation (npm
@@ -120,7 +127,7 @@ no install, no account.
 ## Quickstart
 ```bash
 npm install
-npm run check -- path/to/package.json      # or a requirements*.txt
+npm run check -- path/to/package.json      # or requirements*.txt, or Gemfile.lock
 npm run check -- examples/requirements.txt --latest   # add latest-version + staleness
 npm test                                    # vitest
 npm run build                               # tsup → standalone dist (publishable CLI)

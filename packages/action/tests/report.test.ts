@@ -7,6 +7,8 @@ import {
   diffDeclared,
   introducedKeys,
   isAdjudicated,
+  LOCKFILE,
+  MANIFEST,
   matchesAnyGlob,
   newCveCount,
   prGateFails,
@@ -547,5 +549,47 @@ describe('repoFailCount (repo mode — report everything, fail only at level)', 
   it('ignores non-vuln verdicts (deprecated/stale/safe never fail the scan)', () => {
     const r = report([finding('d', 'deprecated'), finding('s', 'stale'), finding('ok', 'safe')]);
     expect(repoFailCount([r], [], 'cve')).toBe(0);
+  });
+});
+
+describe('MANIFEST / LOCKFILE discovery patterns', () => {
+  // These decide what a PR diff and a repo sweep even look at. A name missing here is an
+  // entire ecosystem silently unscanned behind a green check — so pin every supported name.
+  it('matches every manifest core can parse, at the root and nested', () => {
+    for (const p of [
+      'package.json',
+      'backend/package.json',
+      'requirements.txt',
+      'requirements-dev.txt',
+      'services/api/requirements.txt',
+      'Gemfile.lock',
+      'engines/billing/Gemfile.lock',
+      '.github/workflows/ci.yml',
+      '.github/workflows/release.yaml',
+    ]) {
+      expect(MANIFEST.test(p), p).toBe(true);
+    }
+  });
+
+  it('ignores lookalikes', () => {
+    for (const p of [
+      'Gemfile', // requirements only — no resolved versions to scan (core rejects it too)
+      'package.json.bak',
+      'docs/package.json.md',
+      'requirements.md',
+      'ci.yml', // a workflow only counts under .github/workflows/
+      'config/workflows/ci.yml',
+    ]) {
+      expect(MANIFEST.test(p), p).toBe(false);
+    }
+  });
+
+  it('routes npm-family lockfiles separately (they map to a sibling package.json)', () => {
+    for (const p of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'app/yarn.lock']) {
+      expect(LOCKFILE.test(p), p).toBe(true);
+      expect(MANIFEST.test(p), p).toBe(false); // must not be scanned as a manifest itself
+    }
+    // A self-locked manifest is the manifest — it must NOT be redirected to a package.json.
+    expect(LOCKFILE.test('Gemfile.lock')).toBe(false);
   });
 });

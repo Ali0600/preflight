@@ -31555,6 +31555,7 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // ../core/src/types.ts
+var REGISTRY_ECOSYSTEMS = /* @__PURE__ */ new Set(["npm", "PyPI"]);
 var VERDICT_ORDER = {
   malware: 0,
   cve: 1,
@@ -31687,6 +31688,58 @@ function parseYarnV1(text) {
   }
   return { all, bySpec };
 }
+var GEM_SOURCE_SECTIONS = /* @__PURE__ */ new Set(["GEM", "GIT", "PATH"]);
+function gemVersion(raw) {
+  const dash = raw.indexOf("-");
+  return dash === -1 ? raw : raw.slice(0, dash);
+}
+function parseGemfileLock(content) {
+  const versions = /* @__PURE__ */ new Map();
+  const directs = /* @__PURE__ */ new Map();
+  let section = "";
+  let inSpecs = false;
+  let specIndent;
+  for (const raw of content.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (!line.trim()) continue;
+    if (!/^\s/.test(line)) {
+      section = line.trim();
+      inSpecs = false;
+      specIndent = void 0;
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const body = line.trim();
+    if (GEM_SOURCE_SECTIONS.has(section)) {
+      if (body === "specs:") {
+        inSpecs = true;
+        specIndent = void 0;
+        continue;
+      }
+      if (!inSpecs) continue;
+      if (specIndent === void 0) specIndent = indent;
+      if (indent > specIndent) continue;
+      const m = body.match(/^(\S+)\s+\((.+)\)$/);
+      if (!m) continue;
+      if (section === "PATH") continue;
+      const name = m[1];
+      if (!versions.has(name)) versions.set(name, gemVersion(m[2]));
+      continue;
+    }
+    if (section === "DEPENDENCIES") {
+      const entry = body.replace(/!$/, "").trim();
+      const m = entry.match(/^(\S+)(?:\s+\((.+)\))?$/);
+      if (!m) continue;
+      directs.set(m[1], m[2]?.trim() ?? "");
+    }
+  }
+  const deps = [];
+  for (const [name, version] of versions) {
+    const range = directs.get(name);
+    deps.push({ name, range: range ?? "", version, dev: false, direct: range !== void 0 });
+  }
+  return deps;
+}
 function parseYarnBerry(text) {
   const lock = (0, import_yaml.parse)(text);
   const all = [];
@@ -31717,14 +31770,27 @@ function ecosystemFor(path) {
   const f = (0, import_node_path.basename)(path).toLowerCase();
   if (f === "package.json") return "npm";
   if (f.startsWith("requirements") && f.endsWith(".txt")) return "PyPI";
+  if (f === "gemfile.lock") return "RubyGems";
   throw new Error(
-    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, or .github/workflows/*.yml)`
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, or .github/workflows/*.yml)`
   );
 }
+var SELF_LOCKED = /* @__PURE__ */ new Set(["RubyGems"]);
 function parseManifestContent(filename, content) {
   const ecosystem = ecosystemFor(filename);
-  const dependencies = ecosystem === "npm" ? parseNpm(content) : ecosystem === "PyPI" ? parsePip(content) : parseWorkflow(content);
-  return { ecosystem, path: filename, dependencies, lockfile: ecosystem === "npm" ? false : void 0 };
+  const parse4 = {
+    npm: parseNpm,
+    PyPI: parsePip,
+    actions: parseWorkflow,
+    RubyGems: parseGemfileLock
+  };
+  const dependencies = parse4[ecosystem](content);
+  return {
+    ecosystem,
+    path: filename,
+    dependencies,
+    lockfile: SELF_LOCKED.has(ecosystem) ? true : ecosystem === "npm" ? false : void 0
+  };
 }
 var NPM_LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 function parseManifest(path) {
@@ -32105,7 +32171,11 @@ var OSV = "https://api.osv.dev";
 var OSV_ECOSYSTEM = {
   npm: "npm",
   PyPI: "PyPI",
-  actions: "GitHub Actions"
+  actions: "GitHub Actions",
+  // Verified live 2026-08-18 that OSV DOES evaluate versioned querybatch queries here (unlike
+  // "GitHub Actions", which needs the local range-matching path below): rails@7.0.0 -> 1
+  // advisory, nokogiri@1.13.0 -> 28, and a known-clean version -> 0.
+  RubyGems: "RubyGems"
 };
 var OSV_BATCH = 1e3;
 function chunk(arr, size) {
@@ -32594,7 +32664,12 @@ var POPULAR = {
     "peaceiris/actions-gh-pages",
     "codecov/codecov-action",
     "pypa/gh-action-pypi-publish"
-  ]
+  ],
+  // Deliberately EMPTY: this list is the heuristic's whole corpus, and a half-curated one is
+  // worse than none — a popular gem missing from it can't be squatted-against, while a
+  // careless entry turns a legitimate gem into a false warning. Populate it (from a real
+  // rubygems.org download ranking) in the same change that enables it, not before.
+  RubyGems: []
 };
 function normalize(name) {
   return name.replace(/[_.]/g, "-").toLowerCase();
@@ -32602,7 +32677,8 @@ function normalize(name) {
 var NORM = {
   npm: new Set(POPULAR.npm.map(normalize)),
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
-  actions: new Set(POPULAR.actions.map(normalize))
+  actions: new Set(POPULAR.actions.map(normalize)),
+  RubyGems: new Set(POPULAR.RubyGems.map(normalize))
 };
 function isOneEditApart(a, b) {
   if (a === b || Math.abs(a.length - b.length) > 1) return false;
@@ -32720,6 +32796,9 @@ function licenseRisk(license) {
 }
 
 // ../core/src/lockstep.ts
+function ecosystemOf(set) {
+  return set.ecosystem ?? "npm";
+}
 var FRAMEWORK_SETS = [
   {
     framework: "Expo",
@@ -32780,18 +32859,49 @@ var FRAMEWORK_SETS = [
     exact: ["astro"],
     prefixes: ["@astrojs/"],
     anchors: ["astro"]
+  },
+  {
+    // The textbook lockstep set: the `rails` gem declares every component at `= X.Y.Z` exactly
+    // (verified against the rubygems API for both 7.1.3 and 8.1.3.1 — all 12 components `=`,
+    // while `bundler` is `>= 1.15.0` and is therefore NOT a member). Bumping one component on
+    // its own is unresolvable while `rails` is present; Bundler moves the whole set together.
+    // No prefixes: `action*`/`active*` are ordinary namespaces on rubygems.org (actionpack-*
+    // plugins, activerecord-import, …) that Rails does not coordinate — matching them would
+    // hand out false "framework-pinned" advice.
+    framework: "Rails",
+    tool: "bundle update rails",
+    ecosystem: "RubyGems",
+    exact: [
+      "rails",
+      "railties",
+      "actioncable",
+      "actionmailbox",
+      "actionmailer",
+      "actionpack",
+      "actiontext",
+      "actionview",
+      "activejob",
+      "activemodel",
+      "activerecord",
+      "activestorage",
+      "activesupport"
+    ],
+    prefixes: [],
+    anchors: ["rails", "railties"]
   }
 ];
-function presentFrameworks(depNames) {
+function presentFrameworks(depNames, ecosystem = "npm") {
   const names = depNames instanceof Set ? depNames : new Set(depNames);
   const present = /* @__PURE__ */ new Set();
   for (const set of FRAMEWORK_SETS) {
+    if (ecosystemOf(set) !== ecosystem) continue;
     if (set.anchors.some((a) => names.has(a))) present.add(set.framework);
   }
   return present;
 }
-function lockstepFor(name, present) {
+function lockstepFor(name, present, ecosystem = "npm") {
   for (const set of FRAMEWORK_SETS) {
+    if (ecosystemOf(set) !== ecosystem) continue;
     if (present !== void 0 && !present.has(set.framework)) continue;
     if (set.exact.includes(name) || set.prefixes.some((p) => name.startsWith(p))) {
       return { pinned: true, framework: set.framework, tool: set.tool };
@@ -33492,9 +33602,11 @@ async function analyzeManifest(manifest, opts = {}) {
   }
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
-  const registryEco = ecosystem !== "actions";
-  const runtimeTarget = registryEco ? opts.runtimes?.[ecosystem === "npm" ? "node" : "python"] : void 0;
-  const frameworks = presentFrameworks(directNames);
+  const registryEco = REGISTRY_ECOSYSTEMS.has(ecosystem);
+  const RUNTIME_OF = { npm: "node", PyPI: "python" };
+  const runtimeName = RUNTIME_OF[ecosystem];
+  const runtimeTarget = runtimeName ? opts.runtimes?.[runtimeName] : void 0;
+  const frameworks = presentFrameworks(directNames, ecosystem);
   const squatHits = /* @__PURE__ */ new Map();
   for (const name of directNames) {
     const similarTo = typosquatOf(name, ecosystem);
@@ -33527,7 +33639,7 @@ async function analyzeManifest(manifest, opts = {}) {
       dev: d.dev,
       direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
-      lockstep: lockstepFor(d.name, frameworks),
+      lockstep: lockstepFor(d.name, frameworks, ecosystem),
       latest: info2?.latest,
       lastPublish: info2?.lastPublish,
       // Registry self-declared license first; deps.dev's detected SPDX (under --health) fills gaps.
@@ -33647,6 +33759,20 @@ function describeSources(args) {
       name: "ref pinning (offline)",
       status: "ok",
       detail: mutable ? `${mutable} of ${findings.length} uses pinned to a mutable tag/branch \u2014 pin commit SHAs` : `all ${findings.length} uses pinned to full commit SHAs`
+    });
+    return sources;
+  }
+  if (!REGISTRY_ECOSYSTEMS.has(ecosystem)) {
+    const pinned = findings.filter((f) => f.lockstep.pinned).length;
+    sources.push({
+      name: "framework lockstep (offline)",
+      status: "ok",
+      detail: pinned ? `${pinned} of ${findings.length} package(s) are framework-coordinated` : `no framework-coordinated packages among ${findings.length}`
+    });
+    sources.push({
+      name: `${ecosystem} registry`,
+      status: "skipped",
+      detail: "freshness, health, downloads + runtime checks are not implemented for this ecosystem yet"
     });
     return sources;
   }
@@ -33807,6 +33933,8 @@ function renderPolicySection(violations, suppressed = []) {
   }
   return lines.join("\n");
 }
+var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+var LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 var MARKER = "<!-- preflight-action -->";
 var ISSUE_MARKER = "<!-- preflight-scheduled -->";
 var EMOJI = {
@@ -34074,8 +34202,6 @@ function renderComment(results, skipped = []) {
 }
 
 // src/index.ts
-var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
-var LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 var LOCKFILE_NAMES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 function resolveRuntimes(policy) {
   const targets = detectRuntimes(".");

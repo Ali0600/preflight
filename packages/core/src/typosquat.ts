@@ -32,6 +32,11 @@ const POPULAR: Record<Ecosystem, string[]> = {
     'docker/setup-buildx-action', 'docker/login-action', 'softprops/action-gh-release',
     'peaceiris/actions-gh-pages', 'codecov/codecov-action', 'pypa/gh-action-pypi-publish',
   ],
+  // Deliberately EMPTY: this list is the heuristic's whole corpus, and a half-curated one is
+  // worse than none — a popular gem missing from it can't be squatted-against, while a
+  // careless entry turns a legitimate gem into a false warning. Populate it (from a real
+  // rubygems.org download ranking) in the same change that enables it, not before.
+  RubyGems: [],
 };
 
 /** Normalize separators so `cross_env`/`cross.env` compare against `cross-env`. Scopes are kept:
@@ -45,6 +50,7 @@ const NORM: Record<Ecosystem, Set<string>> = {
   npm: new Set(POPULAR.npm.map(normalize)),
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
   actions: new Set(POPULAR.actions.map(normalize)),
+  RubyGems: new Set(POPULAR.RubyGems.map(normalize)),
 };
 
 /** True iff the Damerau-Levenshtein distance between a and b is exactly 1 (incl. one transposition). */

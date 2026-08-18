@@ -32,17 +32,15 @@ import {
   renderRepoIssue,
   repoFailCount,
   ISSUE_MARKER,
+  LOCKFILE,
+  MANIFEST,
   MARKER,
   type ManifestReport,
   type SkippedManifest,
 } from './report';
 
-// package.json / requirements*.txt anywhere in the tree, plus GitHub Actions workflow files
-// (their `uses:` entries are scanned against OSV's "GitHub Actions" ecosystem).
-const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
-// A lockfile-only change still moves the installed tree (transitive adds/bumps) —
-// it must trigger the scan of its sibling manifest too (dogfood BUG-3/#20).
-const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
+// Which files are manifests / lockfiles lives in report.ts (pure + unit-tested) — this module
+// is octokit glue and carries no tests of its own.
 const LOCKFILE_NAMES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] as const;
 
 type Octokit = ReturnType<typeof github.getOctokit>;

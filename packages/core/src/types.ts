@@ -1,10 +1,21 @@
 // Shared types for the Preflight engine. The CLI, GitHub Action, and web dashboard
 // all consume these — keep this the single source of truth.
 
-/** `actions` = GitHub Actions workflows (`.github/workflows/*.yml`): the "packages" are the
- * `uses:` entries, queried against OSV's "GitHub Actions" ecosystem. Registry-style lookups
- * (latest/health/runtimes/downloads) don't apply to it. */
-export type Ecosystem = 'npm' | 'PyPI' | 'actions';
+/** Every value is an OSV ecosystem name, so `OSV_ECOSYSTEM` stays a near-identity map.
+ *
+ * `actions` = GitHub Actions workflows (`.github/workflows/*.yml`): the "packages" are the
+ * `uses:` entries, queried against OSV's "GitHub Actions" ecosystem.
+ *
+ * Only `npm`/`PyPI` are REGISTRY ecosystems (see `REGISTRY_ECOSYSTEMS`) — the others get OSV
+ * (+ KEV/EPSS) and lockstep only; registry-style lookups (latest/health/runtimes/downloads)
+ * don't apply to them. */
+export type Ecosystem = 'npm' | 'PyPI' | 'actions' | 'RubyGems';
+
+/** Ecosystems with a package registry behind them, i.e. where `--latest`/`--health`,
+ * download counts, runtime-compat and the typosquat corpus mean something. Everything else
+ * is scanned by OSV alone. Membership is explicit (not "not actions") so a newly-added
+ * ecosystem can never inherit npm/PyPI behaviour by omission. */
+export const REGISTRY_ECOSYSTEMS: ReadonlySet<Ecosystem> = new Set<Ecosystem>(['npm', 'PyPI']);
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
@@ -57,7 +68,9 @@ export interface Manifest {
   ecosystem: Ecosystem;
   path: string;
   dependencies: Dependency[];
-  /** npm only: whether a lockfile expanded the graph (`false` = declared/direct deps only). */
+  /** Whether a lockfile expanded the graph (`false` = declared/direct deps only; `undefined` =
+   * the concept doesn't apply). npm reads a sibling lockfile; self-contained lock manifests
+   * (Gemfile.lock) are always `true`; requirements.txt has no lockfile, hence `undefined`. */
   lockfile?: boolean;
 }
 

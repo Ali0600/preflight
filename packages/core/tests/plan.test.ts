@@ -231,15 +231,32 @@ describe('buildPlan (npm + framework)', () => {
     expect(plan.artifacts.dependabot.content).not.toContain('dependency-name: eslint');
   });
 
-  it('rejects an unknown framework with the known list', async () => {
+  it('rejects an unknown framework, naming the ecosystem and its known list', async () => {
     await expect(
       buildPlan({ ecosystem: 'npm', packages: [], framework: 'django', target: NODE18 }),
-    ).rejects.toThrow(/Unknown framework "django"/);
+    ).rejects.toThrow(/Unknown npm framework "django"/);
+  });
+
+  it('rejects a framework from another ecosystem rather than seeding its packages', async () => {
+    // Rails IS a known set — but only for RubyGems. Seeding an npm plan with it would emit a
+    // package.json listing gem names, every one of which 404s on the npm registry.
+    await expect(
+      buildPlan({ ecosystem: 'npm', packages: [], framework: 'rails', target: NODE18 }),
+    ).rejects.toThrow(/Unknown npm framework "rails"/);
   });
 
   it('frameworkSet is case-insensitive', () => {
     expect(frameworkSet('EXPO')?.framework).toBe('Expo');
     expect(frameworkSet('next.js')?.framework).toBe('Next.js');
-    expect(frameworkSet('rails')).toBeUndefined();
+    expect(frameworkSet('not-a-framework')).toBeUndefined();
+  });
+
+  it('frameworkSet is scoped to the ecosystem being planned', () => {
+    // `plan` seeds the manifest with the set's member NAMES, so a cross-ecosystem match would
+    // emit a package.json full of gem names. Rails is only findable when planning RubyGems.
+    expect(frameworkSet('rails')).toBeUndefined(); // default = npm
+    expect(frameworkSet('rails', 'npm')).toBeUndefined();
+    expect(frameworkSet('rails', 'RubyGems')?.framework).toBe('Rails');
+    expect(frameworkSet('expo', 'RubyGems')).toBeUndefined();
   });
 });

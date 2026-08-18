@@ -1,0 +1,66 @@
+GIT
+  remote: https://github.com/example/forked-gem.git
+  revision: 9f1ac0c8a1a37a1cbe8fbd9d8a2a2c2a1b0d4e5f
+  branch: main
+  specs:
+    forked-gem (2.1.0)
+      activesupport (>= 6.0)
+
+PATH
+  remote: engines/billing
+  specs:
+    billing (0.1.0)
+      rails (>= 7.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    actioncable (7.0.0)
+      actionpack (= 7.0.0)
+      activesupport (= 7.0.0)
+      nio4r (~> 2.0)
+    actionpack (7.0.0)
+      actionview (= 7.0.0)
+      activesupport (= 7.0.0)
+    actionview (7.0.0)
+      activesupport (= 7.0.0)
+    activemodel (7.0.0)
+      activesupport (= 7.0.0)
+    activerecord (7.0.0)
+      activemodel (= 7.0.0)
+      activesupport (= 7.0.0)
+    activesupport (7.0.0)
+      concurrent-ruby (~> 1.0, >= 1.0.2)
+    concurrent-ruby (1.2.2)
+    nio4r (2.5.9)
+    nokogiri (1.13.0-x86_64-linux)
+      racc (~> 1.4)
+    puma (6.4.0)
+      nio4r (~> 2.0)
+    racc (1.7.1)
+    rails (7.0.0)
+      actioncable (= 7.0.0)
+      actionpack (= 7.0.0)
+      activerecord (= 7.0.0)
+      activesupport (= 7.0.0)
+      railties (= 7.0.0)
+    railties (7.0.0)
+      actionpack (= 7.0.0)
+      activesupport (= 7.0.0)
+
+PLATFORMS
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  billing!
+  forked-gem!
+  nokogiri
+  puma (~> 6.4)
+  rails (~> 7.0.0)
+
+RUBY VERSION
+   ruby 3.2.2p53
+
+BUNDLED WITH
+   2.4.10

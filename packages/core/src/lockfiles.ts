@@ -163,6 +163,94 @@ function parseYarnV1(text: string): LockGraph {
   return { all, bySpec };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Gemfile.lock (Bundler)
+//
+// Unlike npm/pnpm/yarn, this file is BOTH the manifest and the lockfile: it carries the resolved
+// version of every installed gem plus a DEPENDENCIES list naming the ones the Gemfile declared.
+// So the parser takes no `declared` argument and returns the whole graph on its own.
+//
+// Scope notes (deliberate):
+// - `dev: false` everywhere. Bundler records groups (`:development`, `:test`) in the *Gemfile*,
+//   not in the lock, so dev-vs-prod scope is simply not in this file. Treating every gem as prod
+//   is the conservative side of that gap: a scope-filtering policy scans MORE, never less.
+// - PATH sections are skipped. Those are local gems/engines living in the repo, whose names are
+//   arbitrary — a local `payments` gem must not inherit advisories from a rubygems.org gem that
+//   happens to share the name. GIT sections ARE scanned: a git dep is a fork of a real gem at a
+//   real version, so matching it against advisories is right (and OSV simply finds nothing when
+//   the fork's version doesn't exist upstream).
+// - No install-script signal exists in this format, so `installScript` is never set.
+
+/** Sections that introduce gem specs. `PATH` is parsed but its specs are dropped (see above). */
+const GEM_SOURCE_SECTIONS = new Set(['GEM', 'GIT', 'PATH']);
+
+/** `nokogiri (1.13.0-x86_64-linux)` -> `1.13.0`. A gem version is dot-separated (`1.0.0.beta1`),
+ * so the first `-` can only start the platform suffix. */
+function gemVersion(raw: string): string {
+  const dash = raw.indexOf('-');
+  return dash === -1 ? raw : raw.slice(0, dash);
+}
+
+/**
+ * Parse a Bundler `Gemfile.lock` into the full installed graph. Gems named in `DEPENDENCIES` are
+ * tagged `direct` (carrying the declared requirement as `range`); everything else is transitive.
+ */
+export function parseGemfileLock(content: string): Dependency[] {
+  const versions = new Map<string, string>(); // gem name -> resolved version (rubygems/git only)
+  const directs = new Map<string, string>(); // gem name -> declared requirement ("" when bare)
+  let section = '';
+  let inSpecs = false;
+  /** Indent width of a spec line in the current section — set from the first one seen, so any
+   * indentation style works and deeper lines are correctly read as dependency edges. */
+  let specIndent: number | undefined;
+
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line.trim()) continue;
+    if (!/^\s/.test(line)) {
+      section = line.trim();
+      inSpecs = false;
+      specIndent = undefined;
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const body = line.trim();
+
+    if (GEM_SOURCE_SECTIONS.has(section)) {
+      if (body === 'specs:') {
+        inSpecs = true;
+        specIndent = undefined;
+        continue;
+      }
+      if (!inSpecs) continue; // remote:/revision:/branch: metadata above the specs list
+      if (specIndent === undefined) specIndent = indent;
+      // Deeper than a spec line = one of that gem's requirements, not an installed gem itself.
+      if (indent > specIndent) continue;
+      const m = body.match(/^(\S+)\s+\((.+)\)$/);
+      if (!m) continue;
+      if (section === 'PATH') continue; // local code — not a rubygems.org package (see note)
+      const name = m[1]!;
+      if (!versions.has(name)) versions.set(name, gemVersion(m[2]!));
+      continue;
+    }
+
+    if (section === 'DEPENDENCIES') {
+      // `rails (~> 7.0.0)`, `nokogiri`, or `foo!` / `foo (= 1.0)!` for a git/path-sourced gem.
+      const entry = body.replace(/!$/, '').trim();
+      const m = entry.match(/^(\S+)(?:\s+\((.+)\))?$/);
+      if (!m) continue;
+      directs.set(m[1]!, m[2]?.trim() ?? '');
+    }
+  }
+
+  const deps: Dependency[] = [];
+  for (const [name, version] of versions) {
+    const range = directs.get(name);
+    deps.push({ name, range: range ?? '', version, dev: false, direct: range !== undefined });
+  }
+  return deps;
+}
+
 /** Yarn berry (v2+): a YAML map of `"spec, spec": { version, resolution }`. */
 function parseYarnBerry(text: string): LockGraph {
   const lock = parse(text) as Record<string, { version?: string | number; resolution?: string } | null>;

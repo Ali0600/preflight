@@ -67,19 +67,24 @@ export default function Page() {
           >
             <option value="package.json">package.json (npm)</option>
             <option value="requirements.txt">requirements.txt (pip)</option>
+            <option value="Gemfile.lock">Gemfile.lock (RubyGems)</option>
           </select>
           <label className="check">
             <input type="checkbox" checked={health} onChange={(e) => setHealth(e.target.checked)} />
             Include OpenSSF health (slower)
           </label>
-          <input
-            className="select"
-            style={{ width: 150 }}
-            value={runtime}
-            placeholder={filename === 'requirements.txt' ? 'Python target, e.g. 3.9' : 'Node target, e.g. 18'}
-            aria-label="target runtime version"
-            onChange={(e) => setRuntime(e.target.value)}
-          />
+          {/* Runtime installability is only checked for ecosystems with a registry client
+              (npm/PyPI) — hide the box rather than take a target the scan would ignore. */}
+          {filename !== 'Gemfile.lock' && (
+            <input
+              className="select"
+              style={{ width: 150 }}
+              value={runtime}
+              placeholder={filename === 'requirements.txt' ? 'Python target, e.g. 3.9' : 'Node target, e.g. 18'}
+              aria-label="target runtime version"
+              onChange={(e) => setRuntime(e.target.value)}
+            />
+          )}
 
           <button className="btn" onClick={run} disabled={loading}>
             {loading ? 'Pre-flighting…' : 'Pre-flight'}

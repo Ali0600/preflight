@@ -105,6 +105,18 @@ interface Declared {
 }
 
 /** Marker so we can find & update our own sticky comment instead of posting a new one each push. */
+/** Files this Action treats as scannable manifests, anywhere in the tree. Kept here (pure,
+ * unit-tested) rather than in the octokit glue: it decides what a PR/repo scan even looks at,
+ * so a name silently missing from it is a whole ecosystem going unscanned while the check
+ * reports green. Mirrors `ecosystemFor` in core's manifest.ts — extend both together. */
+export const MANIFEST =
+  /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+
+/** npm-family lockfiles. A lockfile-only change still moves the installed tree (transitive
+ * adds/bumps), so it must trigger a scan of its sibling package.json too (dogfood BUG-3/#20).
+ * Self-locked manifests (Gemfile.lock) are NOT here — they match `MANIFEST` directly. */
+export const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
+
 export const MARKER = '<!-- preflight-action -->';
 /** Marker on the scheduled-scan tracking issue. */
 export const ISSUE_MARKER = '<!-- preflight-scheduled -->';

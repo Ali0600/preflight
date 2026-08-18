@@ -92,7 +92,9 @@ function listSubdirs(repo: string): string[] {
 async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
   const pkg = fetchFile(repo, `${prefix}package.json`);
   const req = fetchFile(repo, `${prefix}requirements.txt`);
-  if (!pkg && !req) return [];
+  // Gemfile.lock is self-contained (it IS the resolved graph), so there's no sibling to fetch.
+  const gems = fetchFile(repo, `${prefix}Gemfile.lock`);
+  if (!pkg && !req && !gems) return [];
 
   const out: Scan[] = [];
   const tmp = mkdtempSync(join(tmpdir(), 'preflight-'));
@@ -106,6 +108,10 @@ async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
     if (req) {
       writeFileSync(join(tmp, 'requirements.txt'), req);
       out.push({ repo, manifest: `${prefix}requirements.txt`, report: await analyze(join(tmp, 'requirements.txt')) });
+    }
+    if (gems) {
+      writeFileSync(join(tmp, 'Gemfile.lock'), gems);
+      out.push({ repo, manifest: `${prefix}Gemfile.lock`, report: await analyze(join(tmp, 'Gemfile.lock')) });
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

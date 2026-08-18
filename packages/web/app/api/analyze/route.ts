@@ -35,6 +35,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'Paste a manifest first.' }, { status: 400 });
   }
   try {
+    // Only npm/PyPI have a runtime-compat check; anything else ignores `runtimes` entirely.
     const name: RuntimeName = /requirements/i.test(filename ?? '') ? 'python' : 'node';
     const version = runtime?.trim();
     const report: Report = await analyzeContent(filename || 'package.json', content, {
@@ -53,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     console.error('preflight /api/analyze failed:', err);
     return Response.json(
-      { error: 'Could not analyze the manifest — ensure it is a valid package.json or requirements.txt.' },
+      { error: 'Could not analyze the manifest — ensure it is a valid package.json, requirements.txt or Gemfile.lock.' },
       { status: 400 },
     );
   }
