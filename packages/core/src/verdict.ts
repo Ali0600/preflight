@@ -89,6 +89,15 @@ export function decideVerdict(f: Omit<Finding, 'verdict' | 'reason'>): {
   if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
     return { verdict: 'incompatible', reason: incompatibleReason(f, f.runtimeCompat) };
   }
+  // Installed beside a version it is known to break with. Ranks with the runtime-incompat cases
+  // for the same reason: the dep is primarily BROKEN here, which outranks freshness advice — but
+  // below an actual vulnerability. Unlike those, no metadata anywhere expresses it (`combos.ts`).
+  if (f.knownBadPair) {
+    return {
+      verdict: 'incompatible',
+      reason: `Known-bad pair with ${f.knownBadPair.with} — ${f.knownBadPair.reason}`,
+    };
+  }
   // The maintainer explicitly said "stop using this" (npm deprecation / PyPI yank) — that
   // outranks lockstep/staleness advice but not an actual vulnerability or install failure.
   if (f.deprecated) {

@@ -86,6 +86,63 @@ export const FRAMEWORK_SETS: FrameworkSet[] = [
     anchors: ['astro'],
   },
   {
+    // Prisma's CLI warns at runtime — "Versions of prisma@X and @prisma/client@Y don't match.
+    // This might lead to unexpected behavior" — but `@prisma/client`'s peer range on `prisma` is
+    // literally `*`, so npm and Dependabot see no conflict at all. That gap is the whole point of
+    // this registry. Deliberately NO `@prisma/` prefix: verified 2026-08-18 that `@prisma/dev`
+    // (0.25.1) and `@prisma/studio-core` (0.33.0) sit off the 7.9.1 line, so a prefix would hand
+    // out false advice about packages Prisma does not coordinate.
+    framework: 'Prisma',
+    tool: 'bump prisma and @prisma/client to the same version together',
+    exact: ['prisma', '@prisma/client'],
+    prefixes: [],
+    anchors: ['prisma', '@prisma/client'],
+  },
+  {
+    // Every Storybook package rides the monorepo version: `@storybook/react@10.5.9` peers
+    // `storybook: ^10.5.9` and pins `@storybook/react-dom-shim@10.5.9` exactly (verified, as is
+    // `@storybook/addon-docs@10.5.9`). Bumping the core without the addons is the classic break.
+    framework: 'Storybook',
+    tool: 'npx storybook@latest upgrade',
+    exact: ['storybook'],
+    prefixes: ['@storybook/'],
+    anchors: ['storybook'],
+  },
+  {
+    // The strongest evidence of any entry here: `@trpc/client` declares
+    // `peerDependencies: { "@trpc/server": "11.18.0" }` — an EXACT pin, not a range.
+    framework: 'tRPC',
+    tool: 'bump all @trpc/* to the same version',
+    exact: [],
+    prefixes: ['@trpc/'],
+    anchors: ['@trpc/server', '@trpc/client'],
+  },
+  {
+    // Sentry's own migration guide: "make sure to upgrade all of them to the same version", and
+    // `@sentry/node@10.70.0` pins `@sentry/core`/`@sentry/node-core`/`@sentry/server-utils` at
+    // 10.70.0 exactly. But NO `@sentry/` prefix — verified 2026-08-18 that the build-tool and
+    // internal packages version independently (`@sentry/cli` 3.6.2, `@sentry/webpack-plugin` and
+    // `@sentry/vite-plugin` 5.4.0, `@sentry/conventions` 0.19.0), so a prefix would wrongly tell
+    // people to hold those back. The SDK runtimes are listed explicitly instead.
+    framework: 'Sentry',
+    tool: 'bump all Sentry SDK packages to the same version',
+    exact: [
+      '@sentry/core', '@sentry/browser', '@sentry/node', '@sentry/react', '@sentry/vue',
+      '@sentry/angular', '@sentry/svelte', '@sentry/sveltekit', '@sentry/nextjs', '@sentry/nuxt',
+      '@sentry/remix', '@sentry/astro', '@sentry/solid', '@sentry/solidstart', '@sentry/bun',
+      '@sentry/deno', '@sentry/nestjs', '@sentry/aws-serverless', '@sentry/cloudflare',
+      '@sentry/vercel-edge', '@sentry/opentelemetry', '@sentry/profiling-node',
+      '@sentry/react-router', '@sentry/google-cloud-serverless',
+    ],
+    prefixes: [],
+    anchors: [
+      '@sentry/browser', '@sentry/node', '@sentry/react', '@sentry/vue', '@sentry/angular',
+      '@sentry/svelte', '@sentry/sveltekit', '@sentry/nextjs', '@sentry/nuxt', '@sentry/remix',
+      '@sentry/astro', '@sentry/solid', '@sentry/bun', '@sentry/deno', '@sentry/nestjs',
+      '@sentry/aws-serverless', '@sentry/cloudflare', '@sentry/react-router',
+    ],
+  },
+  {
     // The textbook lockstep set: the `rails` gem declares every component at `= X.Y.Z` exactly
     // (verified against the rubygems API for both 7.1.3 and 8.1.3.1 — all 12 components `=`,
     // while `bundler` is `>= 1.15.0` and is therefore NOT a member). Bumping one component on

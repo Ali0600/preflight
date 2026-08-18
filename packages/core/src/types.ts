@@ -165,6 +165,9 @@ export interface Finding {
   runtimeCompat?: RuntimeCompat;
   /** GitHub Actions only: `uses:` pinned to a mutable tag/branch instead of a commit SHA. */
   mutableRef?: boolean;
+  /** This package is installed alongside a version it is known to break with (`combos.ts`), even
+   * though every declared peer range admits the pair — the failure no metadata can express. */
+  knownBadPair?: { with: string; reason: string };
   verdict: Verdict;
   reason: string;
 }

@@ -111,3 +111,42 @@ describe('Rails (RubyGems) — ecosystem scoping', () => {
     expect(lockstepFor('activesupport', new Set(), 'RubyGems').pinned).toBe(false);
   });
 });
+
+describe('npm same-version sets (Prisma / Storybook / tRPC / Sentry)', () => {
+  it('Prisma claims only the documented pair, never the whole namespace', () => {
+    const p = new Set(['Prisma']);
+    expect(lockstepFor('prisma', p)).toMatchObject({ pinned: true, framework: 'Prisma' });
+    expect(lockstepFor('@prisma/client', p).pinned).toBe(true);
+    // Verified off the shared version line — a prefix rule would give false advice about these.
+    expect(lockstepFor('@prisma/dev', p).pinned).toBe(false);
+    expect(lockstepFor('@prisma/studio-core', p).pinned).toBe(false);
+  });
+
+  it('Storybook and tRPC claim their whole namespace (uniformly versioned)', () => {
+    expect(lockstepFor('@storybook/addon-docs', new Set(['Storybook']))).toMatchObject({
+      framework: 'Storybook',
+      tool: 'npx storybook@latest upgrade',
+    });
+    expect(lockstepFor('@trpc/react-query', new Set(['tRPC'])).pinned).toBe(true);
+  });
+
+  it('Sentry claims the SDK runtimes but not the independently-versioned tooling', () => {
+    const s = new Set(['Sentry']);
+    expect(lockstepFor('@sentry/react', s)).toMatchObject({ framework: 'Sentry' });
+    expect(lockstepFor('@sentry/core', s).pinned).toBe(true);
+    // These version on their own lines (3.6.2 / 5.4.0 / 0.19.0 vs the SDK's 10.70.0).
+    expect(lockstepFor('@sentry/cli', s).pinned).toBe(false);
+    expect(lockstepFor('@sentry/webpack-plugin', s).pinned).toBe(false);
+    expect(lockstepFor('@sentry/vite-plugin', s).pinned).toBe(false);
+    expect(lockstepFor('@sentry/conventions', s).pinned).toBe(false);
+  });
+
+  it('each set still requires its own anchor to be present', () => {
+    expect(presentFrameworks(['@storybook/addon-docs'])).toEqual(new Set()); // addon without core
+    expect(presentFrameworks(['storybook', '@storybook/addon-docs'])).toEqual(new Set(['Storybook']));
+    expect(presentFrameworks(['@trpc/server'])).toEqual(new Set(['tRPC']));
+    expect(presentFrameworks(['@prisma/client'])).toEqual(new Set(['Prisma']));
+    // @sentry/cli alone is not the Sentry SDK.
+    expect(presentFrameworks(['@sentry/cli'])).toEqual(new Set());
+  });
+});

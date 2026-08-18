@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 
+import { findComboConflicts } from './combos';
 import { fetchHealth, type HealthInfo } from './depsdev';
 import { fetchDownloads } from './downloads';
 import { fetchRuntimeEol } from './eol';
@@ -142,6 +143,11 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   // Typosquat heuristic (offline) up-front, so download counts can put numbers behind any hit.
   // Only deps a human chose (direct) — transitive names are registry-real.
   // (For `actions` the curated list holds popular `owner/repo` uses — same attack, CI flavor.)
+  // Known-bad pairs (offline): two packages whose declared peer ranges admit each other but
+  // which break when installed together. Needs the whole dep list at once, so it runs up-front
+  // alongside the typosquat pass rather than per-finding.
+  const comboConflicts = findComboConflicts(dependencies, ecosystem);
+
   const squatHits = new Map<string, string>(); // suspicious name -> the popular package it resembles
   for (const name of directNames) {
     const similarTo = typosquatOf(name, ecosystem);
@@ -208,6 +214,9 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       // Adoption display for deps you chose, under --health.
       downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : undefined,
       mutableRef: d.mutableRef,
+      // A pair that installs cleanly and breaks together (combos.ts) — precomputed over the
+      // whole dep list, since it is a property of the COMBINATION, not of this package alone.
+      knownBadPair: comboConflicts.get(d.name),
       runtimeCompat: runtimeMeta
         ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget!, ecosystem)
         : undefined,
@@ -388,6 +397,19 @@ function describeSources(args: {
       detail: 'freshness, health, downloads + runtime checks are not implemented for this ecosystem yet',
     });
     return sources;
+  }
+
+  // Known-bad pairs — offline, always runs for npm. Reported even at zero so a clean scan shows
+  // the check happened (the registry is small and curated; silence would read as "not checked").
+  if (ecosystem === 'npm') {
+    const pairs = findings.filter((f) => f.knownBadPair).length;
+    sources.push({
+      name: 'known-bad pairs (offline)',
+      status: 'ok',
+      detail: pairs
+        ? `${pairs} package(s) installed beside a version they break with`
+        : 'no known-bad version pairs among the direct dependencies',
+    });
   }
 
   // Registry freshness + license + deprecation — only under --latest (or a license/deprecated policy).

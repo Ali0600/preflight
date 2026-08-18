@@ -23,8 +23,10 @@ export { cycleOf, fetchRuntimeEol } from './eol';
 export { computeRuntimeCompat } from './runtime-compat';
 export { detectRuntimes } from './runtime-detect';
 export {
+  findComboConflicts,
   findComboHolds,
   KNOWN_BAD_COMBOS,
+  type ComboConflict,
   type ComboHold,
   type KnownBadCombo,
 } from './combos';

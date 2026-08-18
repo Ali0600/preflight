@@ -4,9 +4,14 @@
     "installScript": true,
     "suspiciousName": true,
     "deprecated": true,
-    "unpinnedAction": true
+    "unpinnedAction": true,
+    "knownBadPair": true
   },
   "allow": {
-    "installScripts": ["esbuild", "fsevents", "sharp"]
+    "installScripts": [
+      "esbuild",
+      "fsevents",
+      "sharp"
+    ]
   }
 }

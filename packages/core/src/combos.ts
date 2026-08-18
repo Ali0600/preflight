@@ -46,7 +46,79 @@ export const KNOWN_BAD_COMBOS: KnownBadCombo[] = [
     reason:
       "eslint-config-next ≤16's vendored plugin calls an API ESLint 10 removed (crashes at lint time; the upstream eslint peer range doesn't exclude 10)",
   },
+  {
+    // `@types/react@19` declares `peerDependencies: {}` — verified 2026-08-18 — so NOTHING ties
+    // it to a React version and npm/Dependabot see no conflict when it is bumped alone. But the
+    // v19 types removed the global JSX namespace, made `useRef` require an initial argument, and
+    // deleted `React.VFC`/`ReactText`/`ReactChild` (DefinitelyTyped discussion #64451), so a
+    // React 18 codebase stops type-checking. The purest form of what this registry is for: no
+    // metadata anywhere in the ecosystem can express it.
+    ecosystem: 'npm',
+    subject: '@types/react',
+    subjectBroken: '>=19',
+    subjectFallback: '<19',
+    with: 'react',
+    withRange: '<19',
+    reason:
+      '@types/react 19 dropped the global JSX namespace and requires a useRef argument — React 18 code stops compiling (the types package declares no peer range, so nothing blocks the bump)',
+  },
+  {
+    // Same story for the DOM types, which are bumped as a pair with @types/react.
+    ecosystem: 'npm',
+    subject: '@types/react-dom',
+    subjectBroken: '>=19',
+    subjectFallback: '<19',
+    with: 'react-dom',
+    withRange: '<19',
+    reason:
+      '@types/react-dom 19 targets the React 19 client/server APIs — React 18 code stops compiling (the types package declares no peer range, so nothing blocks the bump)',
+  },
 ];
+
+/** A known-bad pair found in a manifest that is already installed (as opposed to `plan`, which
+ * reasons about versions it is about to recommend). */
+export interface ComboConflict {
+  /** The other half of the pair, `name@version`. */
+  with: string;
+  reason: string;
+}
+
+/**
+ * Which installed packages sit in a known-bad pair? Strict on purpose, exactly like
+ * `findComboHolds`: BOTH halves must *provably* satisfy their broken ranges (`satisfies === true`),
+ * so an unparseable version — which returns `undefined`, "can't tell" — never raises a conflict.
+ *
+ * Takes resolved versions only. A range like `^18.0.0` is not a fact about what is installed, and
+ * guessing from it would fire on trees that resolved to something safe.
+ */
+export function findComboConflicts(
+  deps: readonly { name: string; version?: string; direct?: boolean }[],
+  ecosystem: Ecosystem,
+): Map<string, ComboConflict> {
+  const found = new Map<string, ComboConflict>();
+  // Fast path today (every entry below is npm) AND the reason the per-combo `ecosystem` filter
+  // is currently unexercised — a test pins that assumption, so adding a non-npm entry fails
+  // loudly here rather than silently skipping it.
+  if (ecosystem !== 'npm') return found;
+  // Only packages a human chose: you cannot fix a known-bad pair buried in someone else's
+  // transitive tree by editing your manifest, so reporting it there is noise.
+  const versionOf = new Map<string, string>();
+  for (const d of deps) {
+    if (d.direct === false || !d.version) continue;
+    if (!versionOf.has(d.name)) versionOf.set(d.name, d.version);
+  }
+  for (const combo of KNOWN_BAD_COMBOS) {
+    if (combo.ecosystem !== ecosystem) continue;
+    if (found.has(combo.subject)) continue; // first matching combo wins
+    const subjectVersion = versionOf.get(combo.subject);
+    const withVersion = versionOf.get(combo.with);
+    if (!subjectVersion || !withVersion) continue;
+    if (satisfies(subjectVersion, combo.subjectBroken) !== true) continue;
+    if (satisfies(withVersion, combo.withRange) !== true) continue;
+    found.set(combo.subject, { with: `${combo.with}@${withVersion}`, reason: combo.reason });
+  }
+  return found;
+}
 
 export interface ComboHold {
   combo: KnownBadCombo;
