@@ -387,9 +387,27 @@ export function repoFailCount(
 /** Rows shown for introduced-transitive findings before collapsing to "+N more". */
 const TRANSITIVE_ROWS = 10;
 
+/** The `ignore-paths` disclosure line. Shown on EVERY path including the green all-clear —
+ * "nothing to report" plus a silent exclusion is exactly the combination that misleads. */
+function excludedNote(ignored: string[]): string[] {
+  if (ignored.length === 0) return [];
+  return [
+    '',
+    `<sub>${ignored.length} manifest(s) excluded from this gate by \`ignore-paths\`: ${ignored
+      .map((p) => `\`${cell(p)}\``)
+      .join(', ')}</sub>`,
+  ];
+}
+
 /** Render the full sticky PR comment (Markdown). Returns just the body. `skipped` carries any
- * manifests that failed to scan — surfaced as a fail-closed section, never silently dropped. */
-export function renderComment(results: ManifestReport[], skipped: SkippedManifest[] = []): string {
+ * manifests that failed to scan — surfaced as a fail-closed section, never silently dropped.
+ * `ignored` carries manifests excluded by `ignore-paths` — likewise announced, never silent:
+ * a reader must be able to see that the gate deliberately did not look at something. */
+export function renderComment(
+  results: ManifestReport[],
+  skipped: SkippedManifest[] = [],
+  ignored: string[] = [],
+): string {
   // A manifest is worth a section when its declared deps changed OR the tree changed
   // (a lockfile-only PR has changes.size === 0 but still introduces packages).
   const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
@@ -399,6 +417,7 @@ export function renderComment(results: ManifestReport[], skipped: SkippedManifes
   // scan. A scan failure with no other changes must NOT read as "✅ nothing to do".
   if (active.length === 0 && skipped.length === 0) {
     lines.push('No added or bumped dependencies in this PR. ✅');
+    lines.push(...excludedNote(ignored));
     return lines.join('\n');
   }
 
@@ -515,5 +534,6 @@ export function renderComment(results: ManifestReport[], skipped: SkippedManifes
   }
   const eolLines = renderRuntimeEol(results.map((r) => r.report));
   if (eolLines.length > 0) lines.push('', ...eolLines);
+  lines.push(...excludedNote(ignored));
   return lines.join('\n');
 }

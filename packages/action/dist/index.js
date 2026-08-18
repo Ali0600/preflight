@@ -34096,11 +34096,19 @@ function repoFailCount(reports, allowAdvisories, failLevel) {
   return n;
 }
 var TRANSITIVE_ROWS = 10;
-function renderComment(results, skipped = []) {
+function excludedNote(ignored) {
+  if (ignored.length === 0) return [];
+  return [
+    "",
+    `<sub>${ignored.length} manifest(s) excluded from this gate by \`ignore-paths\`: ${ignored.map((p) => `\`${cell(p)}\``).join(", ")}</sub>`
+  ];
+}
+function renderComment(results, skipped = [], ignored = []) {
   const active = results.filter((r) => r.changes.size > 0 || r.introduced.size > 0);
   const lines = [MARKER, "## \u2708\uFE0F Preflight \u2014 dependency check", ""];
   if (active.length === 0 && skipped.length === 0) {
     lines.push("No added or bumped dependencies in this PR. \u2705");
+    lines.push(...excludedNote(ignored));
     return lines.join("\n");
   }
   for (const r of active) {
@@ -34198,6 +34206,7 @@ function renderComment(results, skipped = []) {
   }
   const eolLines = renderRuntimeEol(results.map((r) => r.report));
   if (eolLines.length > 0) lines.push("", ...eolLines);
+  lines.push(...excludedNote(ignored));
   return lines.join("\n");
 }
 
@@ -34229,16 +34238,26 @@ async function run() {
   const policyFile = getInput("policy-file");
   const policy = policyFile ? loadPolicy(policyFile, true) : void 0;
   const mode = getInput("mode") || "pr";
+  const ignoreGlobs = getInput("ignore-paths").split(",").map((p) => p.trim()).filter(Boolean);
   if (policy && failLevelInput && mode !== "repo") {
     warning("Preflight: policy-file governs the gate \u2014 the fail-level input is ignored.");
   }
   if (mode === "repo") {
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? [], failLevel);
+    await runRepoScan(
+      octokit,
+      owner,
+      repo,
+      failOnCve,
+      resolveRuntimes(policy),
+      policy?.allow?.advisories ?? [],
+      failLevel,
+      ignoreGlobs
+    );
   } else {
-    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy, ignoreGlobs);
   }
 }
-async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
+async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy, ignoreGlobs) {
   const pr = context2.payload.pull_request;
   if (!pr) {
     info("Not a pull_request event \u2014 nothing to pre-flight.");
@@ -34258,8 +34277,14 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     if (MANIFEST.test(f.filename)) manifestPaths.add(f.filename);
     else if (LOCKFILE.test(f.filename)) manifestPaths.add((0, import_node_path5.join)((0, import_node_path5.dirname)(f.filename), "package.json"));
   }
+  const ignored = ignoreGlobs.length ? [...manifestPaths].filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
+  for (const p of ignored) manifestPaths.delete(p);
+  if (ignored.length > 0) {
+    info(`Ignoring ${ignored.length} manifest(s) via ignore-paths: ${ignored.join(", ")}`);
+  }
   if (manifestPaths.size === 0) {
     info("No dependency manifests or lockfiles changed in this PR.");
+    if (ignored.length > 0) await upsertComment(octokit, owner, repo, issue_number, renderComment([], [], ignored));
     return;
   }
   const analyzeOpts = {
@@ -34287,6 +34312,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
   writeSarif(results.map((r) => r.report));
   if (results.length === 0 && skipped.length === 0) {
     info("No added or bumped dependencies to report.");
+    if (ignored.length > 0) await upsertComment(octokit, owner, repo, issue_number, renderComment([], [], ignored));
     return;
   }
   const policyResult = policy ? evaluatePolicy(results.flatMap(introducedFindings), policy, {
@@ -34298,7 +34324,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     owner,
     repo,
     issue_number,
-    renderComment(results, skipped) + renderPolicySection(policyResult.violations, policyResult.suppressed)
+    renderComment(results, skipped, ignored) + renderPolicySection(policyResult.violations, policyResult.suppressed)
   );
   setOutput("new-cves", newCveCount(results));
   setOutput("scan-errors", skipped.length);
@@ -34312,8 +34338,7 @@ async function runPrScan(octokit, owner, repo, failOnCve, failLevel, policy) {
     setFailed(`Preflight: this PR ${why}.`);
   }
 }
-async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvisories, failLevel) {
-  const ignoreGlobs = getInput("ignore-paths").split(",").map((p) => p.trim()).filter(Boolean);
+async function runRepoScan(octokit, owner, repo, failOnCve, runtimes, allowAdvisories, failLevel, ignoreGlobs) {
   const all = findManifests(".");
   const ignored = ignoreGlobs.length ? all.filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
   const paths = all.filter((p) => !ignored.includes(p));

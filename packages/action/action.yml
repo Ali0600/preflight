@@ -34,7 +34,7 @@ inputs:
     required: false
     default: ''
   ignore-paths:
-    description: 'mode: repo only — comma-separated globs of manifests to exclude from the scheduled scan (e.g. "examples/**,**/tests/fixtures/**" for intentionally-vulnerable demo files). Exclusions are listed in the tracking issue, never silent. Default: scan everything.'
+    description: 'Comma-separated globs of manifests to exclude, in BOTH modes (e.g. "examples/**,**/tests/fixtures/**" for intentionally-vulnerable demo/fixture files). Exclusions are listed in the PR comment / tracking issue, never silent. Default: scan everything.'
     required: false
     default: ''
 runs:

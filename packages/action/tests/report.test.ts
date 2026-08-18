@@ -593,3 +593,33 @@ describe('MANIFEST / LOCKFILE discovery patterns', () => {
     expect(LOCKFILE.test('Gemfile.lock')).toBe(false);
   });
 });
+
+describe('ignore-paths disclosure in the PR comment', () => {
+  // Excluding a manifest from the gate is fine; doing it SILENTLY is not — a green check would
+  // then mean "clean" and "we never looked" indistinguishably.
+  const note = /excluded from this gate by `ignore-paths`/;
+  const lp = finding('left-pad', 'cve');
+  const changed: ManifestReport = mr({
+    report: report([lp]),
+    changes: new Map([['left-pad', 'added']] as const),
+    introduced: keysOf(lp),
+  });
+
+  it('discloses exclusions on the green all-clear path', () => {
+    const body = renderComment([], [], ['examples/requirements.txt']);
+    expect(body).toContain('No added or bumped dependencies in this PR.');
+    expect(body).toMatch(note);
+    expect(body).toContain('examples/requirements.txt');
+  });
+
+  it('discloses exclusions alongside real findings', () => {
+    const body = renderComment([changed], [], ['packages/core/tests/fixtures/ruby/Gemfile.lock']);
+    expect(body).toMatch(note);
+    expect(body).toContain('Gemfile.lock');
+  });
+
+  it('says nothing when nothing was excluded', () => {
+    expect(renderComment([changed])).not.toMatch(note);
+    expect(renderComment([], [], [])).not.toMatch(note);
+  });
+});

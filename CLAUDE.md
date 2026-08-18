@@ -103,9 +103,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   unparseable) is collected as `skipped`, surfaced in the comment/issue, and **fails the check**
   (`report.ts`'s pure `prGateFails()`) — matching the CLI's non-zero exit; do NOT downgrade it to a
   silent pass. This is distinct from a *degraded* scan (a lost secondary source → warn-only). `mode: repo`
-  (scheduled) scans every committed manifest → tracking issue; supports `ignore-paths` (comma-separated
-  globs — excludes intentionally-vulnerable demo/fixture manifests, exclusions announced in the issue,
-  via `report.ts`'s pure `matchesAnyGlob`/single-pass glob tokenizer) and honors policy
+  (scheduled) scans every committed manifest → tracking issue; honors policy
   `allow.advisories` **only** (`isAdjudicated`: a fully-accepted cve finding → "✅ Accepted by policy"
   section, listed but not counted; malware never adjudicable) + `runtimes` — NOT the `failOn` rules,
   which are pr-mode "what a PR introduces" semantics. **`fail-level` DOES apply in repo mode**
@@ -117,8 +115,16 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
   changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
   and runs `git diff --exit-code -- packages/action/dist`, so a forgotten rebuild fails the build.
-  Workflows: `preflight.yml` (PR, passes `policy-file: preflight.config.json`), `preflight-schedule.yml`
-  (cron, `ignore-paths` excludes examples/fixtures), `release.yml` (`cli-v*` tag → `npm publish
+  **`ignore-paths` applies in BOTH modes** (comma-separated globs, `report.ts`'s pure
+  `matchesAnyGlob`/single-pass tokenizer): this repo's `examples/` and `tests/fixtures/` are
+  INTENTIONALLY vulnerable known-positives, so without it every PR touching a fixture is blocked by
+  the findings that are the fixture's whole point (dogfooded when the Ruby fixture failed PR #63's
+  own gate). Exclusions are always announced — in the tracking issue, and in the PR comment on
+  *every* path including the green all-clear, because "clean" and "we never looked" must not read
+  the same. Default empty; a user's real manifest is never silently skipped.
+  Workflows: `preflight.yml` (PR, passes `policy-file: preflight.config.json` +
+  `ignore-paths: examples/**,**/tests/fixtures/**`), `preflight-schedule.yml`
+  (cron, same `ignore-paths`), `release.yml` (`cli-v*` tag → `npm publish
   @preflight/cli --provenance`); third-party `uses:` are SHA-pinned (Dependabot `github-actions` bumps them).
   **Tag scheme:** plain `v*` (`v1`) = the ACTION's release pointer (consumers write
   `uses: Ali0600/preflight@v1`, resolved by the ROOT `action.yml` → `packages/action/dist`; move the
