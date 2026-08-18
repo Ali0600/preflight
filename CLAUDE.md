@@ -22,7 +22,8 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 ## Layout (npm-workspaces monorepo, TypeScript ESM)
 - `packages/core` (`@preflight/core`) — the engine, reused by CLI/Action/web. **Single source of truth.**
   - `manifest.ts` — parse package.json (+ enumerate the **full lockfile graph**: direct & transitive,
-    each `Finding`/`Dependency` tagged `direct`) / requirements.txt / **`.github/workflows/*.yml`**
+    each `Finding`/`Dependency` tagged `direct`) / requirements.txt / **`Gemfile.lock`** /
+    **`.github/workflows/*.yml`**
     (ecosystem `actions`: `uses:` entries → deps named `owner/repo`, `mutableRef` when the ref
     isn't a full SHA, `version` only for exact `vX.Y.Z` refs; matched on the whole path so a random
     `foo.yml` never parses). OSV scans the whole graph; `--latest`/`--health` apply to direct deps
@@ -30,10 +31,19 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     richest metadata). For `actions`, registry-style lookups (latest/health/runtimes/downloads) are
     forced off in `analyze` — only OSV + KEV/EPSS + typosquat (curated actions list) + ref pinning.
   - `lockfiles.ts` — pnpm (v5/v6/v9) + yarn (classic v1 + berry) graph parsers (`yaml` dep,
-    bundled by tsup). Scope: transitive deps get `dev: false` (reconstructing dev-only
-    reachability needs a graph walk — conservative, scans MORE); `installScript` only where the
-    format exposes it (pnpm v5/v6 `requiresBuild`), never fabricated. Action PR-mode triggers on
-    all three lockfile names and fetches whichever the base tree has.
+    bundled by tsup) **plus `parseGemfileLock`**. Scope: transitive deps get `dev: false`
+    (reconstructing dev-only reachability needs a graph walk — conservative, scans MORE);
+    `installScript` only where the format exposes it (pnpm v5/v6 `requiresBuild`), never
+    fabricated. Action PR-mode triggers on all three npm lockfile names and fetches whichever the
+    base tree has. **Gemfile.lock is SELF-LOCKED** (`SELF_LOCKED` in manifest.ts): the file *is*
+    the manifest and the graph, so `parseManifestContent` alone yields resolved versions and
+    `lockfile` is always `true` — there is no sibling to look for, and a bare `Gemfile` is
+    deliberately rejected (requirements, no versions). Gems: `dev: false` throughout (Bundler
+    groups live in the Gemfile, not the lock), `PATH` sections skipped (local engines whose names
+    would falsely inherit a real gem's advisories), `GIT` sections kept (a fork of a real gem),
+    platform suffixes stripped (`1.13.0-x86_64-linux` → `1.13.0`). The **anchored** spec regex is
+    the load-bearing filter — the section allowlist and `inSpecs` are redundant defence-in-depth
+    (probed: mutating either alone changes nothing).
   - `osv.ts` — OSV.dev client (querybatch → vuln details; captures CVE `aliases`, flags `MAL-` as
     malicious). **GitHub Actions is a separate path**: OSV does NOT evaluate versioned queries for
     that ecosystem (verified live 2026-07-09 — known-affected versions return `{}`), so
@@ -61,7 +71,13 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     the same GetVersion call also yields the detected SPDX `license` (fills registry gaps) and
     `provenance` (npm Sigstore + PyPI PEP 740 attestations both land in `attestations[]`,
     `verified` = deps.dev's signature check — display-only, no gate; shapes verified live 2026-07-09)
-  - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**
+  - `lockstep.ts` — **the framework-pinned registry: the product's edge — keep extending it**.
+    Sets are **ecosystem-tagged** (`ecosystem?: Ecosystem`, default npm) and `presentFrameworks` /
+    `lockstepFor` / `plan.ts`'s `frameworkSet` all take an ecosystem — names are only unique
+    *within* a registry, so without the tag the `rails` gem would claim npm projects (and
+    `--framework rails` would seed an npm plan with gem names). Rails is the RubyGems entry:
+    13 `exact` members, **no prefixes** (`activerecord-import` etc. are unrelated namespaces),
+    `bundler` excluded (rails declares it `>= 1.15.0`, not `=`).
   - `combos.ts` — known-bad version *pairs* (break together despite peer ranges admitting each
     other, e.g. eslint 10 × eslint-config-next ≤16 — #31). `plan` holds the subject back to the
     newest known-good runtime-compatible release + dependabot-ignores the boundary. Data-driven
@@ -87,9 +103,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   unparseable) is collected as `skipped`, surfaced in the comment/issue, and **fails the check**
   (`report.ts`'s pure `prGateFails()`) — matching the CLI's non-zero exit; do NOT downgrade it to a
   silent pass. This is distinct from a *degraded* scan (a lost secondary source → warn-only). `mode: repo`
-  (scheduled) scans every committed manifest → tracking issue; supports `ignore-paths` (comma-separated
-  globs — excludes intentionally-vulnerable demo/fixture manifests, exclusions announced in the issue,
-  via `report.ts`'s pure `matchesAnyGlob`/single-pass glob tokenizer) and honors policy
+  (scheduled) scans every committed manifest → tracking issue; honors policy
   `allow.advisories` **only** (`isAdjudicated`: a fully-accepted cve finding → "✅ Accepted by policy"
   section, listed but not counted; malware never adjudicable) + `runtimes` — NOT the `failOn` rules,
   which are pr-mode "what a PR introduces" semantics. **`fail-level` DOES apply in repo mode**
@@ -101,8 +115,16 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
   `dist/index.js` (tsup, CJS — Actions run from source; REBUILD it whenever action *or core*
   changes, or the shipped action silently runs stale core). **CI enforces this** — `ci.yml` rebuilds
   and runs `git diff --exit-code -- packages/action/dist`, so a forgotten rebuild fails the build.
-  Workflows: `preflight.yml` (PR, passes `policy-file: preflight.config.json`), `preflight-schedule.yml`
-  (cron, `ignore-paths` excludes examples/fixtures), `release.yml` (`cli-v*` tag → `npm publish
+  **`ignore-paths` applies in BOTH modes** (comma-separated globs, `report.ts`'s pure
+  `matchesAnyGlob`/single-pass tokenizer): this repo's `examples/` and `tests/fixtures/` are
+  INTENTIONALLY vulnerable known-positives, so without it every PR touching a fixture is blocked by
+  the findings that are the fixture's whole point (dogfooded when the Ruby fixture failed PR #63's
+  own gate). Exclusions are always announced — in the tracking issue, and in the PR comment on
+  *every* path including the green all-clear, because "clean" and "we never looked" must not read
+  the same. Default empty; a user's real manifest is never silently skipped.
+  Workflows: `preflight.yml` (PR, passes `policy-file: preflight.config.json` +
+  `ignore-paths: examples/**,**/tests/fixtures/**`), `preflight-schedule.yml`
+  (cron, same `ignore-paths`), `release.yml` (`cli-v*` tag → `npm publish
   @preflight/cli --provenance`); third-party `uses:` are SHA-pinned (Dependabot `github-actions` bumps them).
   **Tag scheme:** plain `v*` (`v1`) = the ACTION's release pointer (consumers write
   `uses: Ali0600/preflight@v1`, resolved by the ROOT `action.yml` → `packages/action/dist`; move the
@@ -127,6 +149,19 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 
 ## Conventions / gotchas
 - **All logic lives in `@preflight/core`**; CLI/Action/web are thin wrappers — never duplicate.
+- **Adding an ecosystem** — widen `Ecosystem` in types.ts (values ARE OSV ecosystem names, so
+  `OSV_ECOSYSTEM` stays near-identity) and the compiler will point at every exhaustive
+  `Record<Ecosystem, …>` (`osv`/`sbom`/`typosquat`). Then: `ecosystemFor` + the parse map in
+  manifest.ts, `SCANNABLE_MANIFEST` in analyze.ts, the `MANIFEST` regex in **action/report.ts**
+  (pure + unit-tested — it decides what a scan even looks at, so a missing name is a whole
+  ecosystem unscanned behind a green check), `scanDir` in fleet-scan, the CLI `[path]` help, and
+  the web `<select>`. Registry-style checks are opt-IN via `REGISTRY_ECOSYSTEMS` (npm/PyPI only)
+  — never "not actions", so a new ecosystem can't inherit npm/PyPI's `else = PyPI` ternaries;
+  `describeSources` then emits a lockstep row + an explicit `skipped` registry row rather than
+  going silent (silence reads as coverage).
+- **Probe OSV before assuming**: it evaluates versioned `querybatch` queries for RubyGems (unlike
+  GitHub Actions, which needs local range matching). Verified live 2026-08-18 with a
+  known-positive + a known-clean control.
 - `@preflight/core` still exports `./src/index.ts` directly (zero-build dev loop: tsx/vitest/tsc
   resolve TS via the workspace symlink). The publishable CLI is built by **bundling** core into it
   (`tsup` `noExternal: ['@preflight/core']`), because **npm's `publishConfig` can't repoint

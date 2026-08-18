@@ -13,6 +13,10 @@ const OSV_ECOSYSTEM: Record<Ecosystem, string> = {
   npm: 'npm',
   PyPI: 'PyPI',
   actions: 'GitHub Actions',
+  // Verified live 2026-08-18 that OSV DOES evaluate versioned querybatch queries here (unlike
+  // "GitHub Actions", which needs the local range-matching path below): rails@7.0.0 -> 1
+  // advisory, nokogiri@1.13.0 -> 28, and a known-clean version -> 0.
+  RubyGems: 'RubyGems',
 };
 
 // OSV's `querybatch` rejects very large batches with a 400 (an undocumented ~1000-query practical

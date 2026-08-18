@@ -64,10 +64,17 @@ export interface Plan {
   };
 }
 
-/** Case-insensitive FRAMEWORK_SETS lookup ("expo" -> the Expo set). */
-export function frameworkSet(name: string): (typeof FRAMEWORK_SETS)[number] | undefined {
+/** Case-insensitive FRAMEWORK_SETS lookup ("expo" -> the Expo set), scoped to one ecosystem.
+ * The scope matters: seeding a plan with a framework from another registry would emit a
+ * manifest full of package names that don't exist there (`--framework rails` on an npm plan). */
+export function frameworkSet(
+  name: string,
+  ecosystem: Ecosystem = 'npm',
+): (typeof FRAMEWORK_SETS)[number] | undefined {
   const n = name.trim().toLowerCase();
-  return FRAMEWORK_SETS.find((s) => s.framework.toLowerCase() === n);
+  return FRAMEWORK_SETS.find(
+    (s) => (s.ecosystem ?? 'npm') === ecosystem && s.framework.toLowerCase() === n,
+  );
 }
 
 const firstNum = (v: string) => Number(v.match(/\d+/)?.[0] ?? NaN);
@@ -94,10 +101,11 @@ function floorFor(
 
 export async function buildPlan(req: PlanRequest): Promise<Plan> {
   const { ecosystem, target } = req;
-  const fw = req.framework ? frameworkSet(req.framework) : undefined;
+  const fw = req.framework ? frameworkSet(req.framework, ecosystem) : undefined;
   if (req.framework && !fw) {
+    const known = FRAMEWORK_SETS.filter((s) => (s.ecosystem ?? 'npm') === ecosystem).map((s) => s.framework);
     throw new Error(
-      `Unknown framework "${req.framework}" — known: ${FRAMEWORK_SETS.map((s) => s.framework).join(', ')}`,
+      `Unknown ${ecosystem} framework "${req.framework}" — known: ${known.join(', ') || 'none for this ecosystem'}`,
     );
   }
 
@@ -118,12 +126,12 @@ export async function buildPlan(req: PlanRequest): Promise<Plan> {
   // Attribution context: the explicitly requested framework plus any whose anchor
   // package is among the planned names — `react` in a Next.js plan must not read
   // "coordinated by Expo" (#18).
-  const frameworks = presentFrameworks(names);
+  const frameworks = presentFrameworks(names, ecosystem);
   if (fw) frameworks.add(fw.framework);
 
   const packages: PackagePlan[] = names.map((name) => {
     const meta = metaMap.get(name) ?? { constraints: {} };
-    const lockstep = lockstepFor(name, frameworks);
+    const lockstep = lockstepFor(name, frameworks, ecosystem);
     const latest = meta.latest;
     // Range "" = "any version": the compat result then carries the boundary info;
     // undefined result = every release installs on the target.

@@ -352,3 +352,38 @@ override", was simply another stale-tree artifact; it resolved to the patched 0.
 that silently answers your questions with old data. When a dependency experiment gives an impossible
 result, run `npm ls <pkg> --all` and look for `invalid`/`extraneous` before concluding the tool is
 broken.
+
+## An "equivalent mutant" is a finding about your code, not a failed test
+
+Adding the `Gemfile.lock` parser, a mutation run reported one survivor: removing the
+`GEM_SOURCE_SECTIONS.has(section)` guard changed nothing. The instinct is to write a test that
+catches it. Probing first — re-running the parse loop with each guard switched off — showed the
+section allowlist *and* the `inSpecs` flag are both no-ops on well-formed input: the anchored
+`/^(\S+)\s+\((.+)\)$/` spec regex already rejects every metadata line (`ruby 3.2.2p53`,
+`x86_64-linux`, `remote: …`). The mutant wasn't a coverage gap; it was telling me which guard
+actually carries the weight. Re-aiming the mutant at the regex (loosening it to unanchored) —
+the real constraint — was caught immediately.
+
+**Why it came up:** proving the new Ruby parser's tests bite before shipping them.
+
+**Takeaway:** when a mutant survives, first ask whether the code is *equivalent* under it, not
+whether the test is weak — the answer tells you which line is load-bearing and which is
+defence-in-depth. Then aim the mutant at the load-bearing line. Keep the redundant guards (they're
+cheap and make intent explicit), but don't claim test coverage you don't have.
+
+## A registry keyed on names needs an ecosystem tag before the second ecosystem, not after
+
+Preflight's framework-lockstep registry matched on package *name* only — fine while every entry
+was npm. Adding Rails (a gem) meant a project depending on an npm package called `rails` would be
+told to run `bundle update rails`. Tagging each set with its ecosystem fixed the lookup, and the
+type-checker then found a second, worse leak I hadn't considered: `preflight plan --framework
+<name>` seeds the generated manifest with the set's member *names*, so `--framework rails` on an
+npm plan would have emitted a `package.json` full of gem names that 404 on npm. An existing test
+asserting `frameworkSet('rails')` is `undefined` is what surfaced it.
+
+**Why it came up:** adding the RubyGems ecosystem to a registry that had been npm-only.
+
+**Takeaway:** package names are unique only *within* a registry. Any lookup table keyed on a bare
+name needs an ecosystem/namespace field the moment a second namespace exists — and grep every
+consumer, because the dangerous one is usually not the lookup you were editing. A test that breaks
+when you add data is doing its job: read what it was really asserting before updating it.

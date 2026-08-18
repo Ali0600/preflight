@@ -67,3 +67,47 @@ describe('lockstepFor with a present-frameworks context (#18)', () => {
     expect(lockstepFor('react')).toMatchObject({ pinned: true, framework: 'Expo' });
   });
 });
+
+describe('Rails (RubyGems) — ecosystem scoping', () => {
+  const rails = new Set(['Rails']);
+
+  it('claims the components the rails gem pins at "= X.Y.Z"', () => {
+    // Verified against the rubygems API for rails 7.1.3 and 8.1.3.1: all 12 components are
+    // declared `= <same version>`, so bumping one alone is unresolvable.
+    expect(lockstepFor('activerecord', rails, 'RubyGems')).toMatchObject({
+      pinned: true,
+      framework: 'Rails',
+      tool: 'bundle update rails',
+    });
+    for (const gem of ['railties', 'actionpack', 'actionview', 'activesupport', 'activestorage']) {
+      expect(lockstepFor(gem, rails, 'RubyGems').pinned).toBe(true);
+    }
+  });
+
+  it('leaves independent gems — and lookalike namespaces — unpinned', () => {
+    expect(lockstepFor('nokogiri', rails, 'RubyGems').pinned).toBe(false);
+    expect(lockstepFor('puma', rails, 'RubyGems').pinned).toBe(false);
+    // `bundler` is a rails runtime dep but declared ">= 1.15.0", NOT lockstep — excluded.
+    expect(lockstepFor('bundler', rails, 'RubyGems').pinned).toBe(false);
+    // No prefix matching: these are ordinary rubygems namespaces Rails does not coordinate.
+    expect(lockstepFor('activerecord-import', rails, 'RubyGems').pinned).toBe(false);
+    expect(lockstepFor('actionpack-action_caching', rails, 'RubyGems').pinned).toBe(false);
+  });
+
+  it('never crosses ecosystems in either direction', () => {
+    // A gem must not anchor/claim an npm project and vice versa — names are only unique
+    // *within* a registry, and there are real npm packages called `rails` and `activesupport`.
+    expect(presentFrameworks(['rails', 'puma'], 'npm')).toEqual(new Set());
+    expect(presentFrameworks(['rails', 'puma'], 'RubyGems')).toEqual(new Set(['Rails']));
+    expect(lockstepFor('activerecord', undefined, 'npm').pinned).toBe(false);
+    expect(lockstepFor('next', undefined, 'RubyGems').pinned).toBe(false);
+    expect(lockstepFor('react-native', undefined, 'RubyGems').pinned).toBe(false);
+  });
+
+  it('requires the anchor: rails components alone are not Rails-coordinated', () => {
+    // A project depending on activesupport WITHOUT rails is not a Rails app — the gem
+    // versions independently there, exactly like `react` outside Expo (#18).
+    expect(presentFrameworks(['activesupport', 'nokogiri'], 'RubyGems')).toEqual(new Set());
+    expect(lockstepFor('activesupport', new Set(), 'RubyGems').pinned).toBe(false);
+  });
+});

@@ -29,6 +29,11 @@ jobs:
           # Dogfood our own policy: any-CVE vuln gate + install-script/typosquat rules, with the
           # allow-list announced in the comment. Without this the config file was dead weight.
           policy-file: preflight.config.json
+          # Same exclusions the scheduled scan uses: examples/ and tests/fixtures/ are
+          # INTENTIONALLY vulnerable (demo + known-positive regression data), so a PR that adds
+          # or edits one would otherwise be blocked by findings that are the point of the file.
+          # Real manifests are untouched, and every exclusion is listed in the PR comment.
+          ignore-paths: 'examples/**,**/tests/fixtures/**'
       - name: Upload findings to the Security tab
         if: always() && hashFiles('preflight.sarif') != ''
         uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4

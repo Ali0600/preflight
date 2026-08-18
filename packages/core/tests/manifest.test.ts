@@ -74,8 +74,54 @@ describe('parseManifest — pip', () => {
   });
 });
 
+describe('parseManifest — RubyGems (Gemfile.lock)', () => {
+  const m = parseManifest(fixture('ruby/Gemfile.lock'));
+  const dep = (name: string) => m.dependencies.find((d) => d.name === name);
+
+  it('is a self-locked manifest: resolved versions straight from the text', () => {
+    expect(m.ecosystem).toBe('RubyGems');
+    expect(m.lockfile).toBe(true); // no sibling lockfile to find — this file IS the graph
+    expect(dep('rails')?.version).toBe('7.0.0');
+    expect(dep('concurrent-ruby')?.version).toBe('1.2.2');
+  });
+
+  it('tags DEPENDENCIES entries direct (with their requirement) and the rest transitive', () => {
+    expect(dep('rails')).toMatchObject({ direct: true, range: '~> 7.0.0' });
+    expect(dep('puma')).toMatchObject({ direct: true, range: '~> 6.4' });
+    expect(dep('nokogiri')).toMatchObject({ direct: true, range: '' }); // declared without a requirement
+    expect(dep('nio4r')).toMatchObject({ direct: false, range: '' });
+    expect(dep('racc')?.direct).toBe(false);
+  });
+
+  it('strips the platform suffix from a version', () => {
+    // `nokogiri (1.13.0-x86_64-linux)` — the platform must not reach OSV as part of the version.
+    expect(dep('nokogiri')?.version).toBe('1.13.0');
+  });
+
+  it('skips PATH (local) gems but keeps GIT-sourced ones', () => {
+    // `billing` is an in-repo engine: its name is arbitrary and must never inherit a
+    // rubygems.org gem's advisories. A git dep is a fork of a real gem, so it stays.
+    expect(dep('billing')).toBeUndefined();
+    expect(dep('forked-gem')).toMatchObject({ version: '2.1.0', direct: true });
+  });
+
+  it('ignores dependency edges, PLATFORMS, RUBY VERSION and BUNDLED WITH', () => {
+    const names = m.dependencies.map((d) => d.name);
+    expect(names).not.toContain('ruby'); // "RUBY VERSION\n   ruby 3.2.2p53"
+    expect(names).not.toContain('2.4.10'); // "BUNDLED WITH"
+    expect(names).not.toContain('x86_64-linux'); // PLATFORMS
+    // Every gem appears exactly once even though most are also listed as edges under others.
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('treats every gem as prod scope (Bundler groups live in the Gemfile, not the lock)', () => {
+    expect(m.dependencies.every((d) => d.dev === false)).toBe(true);
+  });
+});
+
 describe('parseManifest — unsupported', () => {
   it('throws on an unknown manifest', () => {
+    // A bare Gemfile carries requirements but no resolved versions — only the lock is scannable.
     expect(() => parseManifest('/tmp/Gemfile')).toThrow(/Unsupported manifest/);
   });
 });

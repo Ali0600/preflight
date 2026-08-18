@@ -13,6 +13,7 @@ import { fetchRegistryAll } from './registry';
 import { computeRuntimeCompat } from './runtime-compat';
 import { fetchRuntimeMetaAll } from './runtimes';
 import { typosquatOf } from './typosquat';
+import { REGISTRY_ECOSYSTEMS } from './types';
 import type {
   DataSource,
   Dependency,
@@ -68,6 +69,11 @@ export async function analyzeContent(
   return analyzeManifest(parseManifestContent(filename, content), opts);
 }
 
+/** Which uploaded file to treat as THE manifest in `analyzeFiles`. Workflow files are excluded
+ * on purpose: a caller posting a repo's files should get its package graph scanned, not one of
+ * its CI workflows (scan those by pointing `analyze` straight at the path). */
+const SCANNABLE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$/i;
+
 /**
  * Analyze an in-memory set of manifest files. Writes them to a throwaway temp dir so the npm
  * lockfile graph resolves (the full transitive scan), then runs `analyze`. Keyless — the caller
@@ -92,9 +98,9 @@ export async function analyzeFiles(
       }
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, content);
-      if (/(^|\/)(package\.json|requirements[\w.-]*\.txt)$/i.test(name)) manifestPath ??= p;
+      if (SCANNABLE_MANIFEST.test(name)) manifestPath ??= p;
     }
-    if (!manifestPath) throw new Error('No package.json or requirements*.txt among the files');
+    if (!manifestPath) throw new Error('No package.json, requirements*.txt or Gemfile.lock among the files');
     return await analyze(manifestPath, opts);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -117,17 +123,21 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
   const directDeps = dependencies.filter((d) => d.direct !== false);
   const directNames = [...new Set(directDeps.map((d) => d.name))];
 
-  // Registry-style lookups (latest/health/runtimes/downloads/typosquat) only make sense for
-  // package registries — an `actions` manifest gets OSV (+ KEV/EPSS) and the mutable-ref check.
-  const registryEco = ecosystem !== 'actions';
+  // Registry-style lookups (latest/health/runtimes/downloads/typosquat) only make sense where a
+  // registry client exists. Everything else gets OSV (+ KEV/EPSS) and the offline checks —
+  // `actions` adds the mutable-ref audit, RubyGems gets lockstep. Membership is explicit, so a
+  // new ecosystem can't silently inherit the npm/PyPI paths (and their `else = PyPI` ternaries).
+  const registryEco = REGISTRY_ECOSYSTEMS.has(ecosystem);
 
   // Runtime installability only applies to deps you version yourself (direct), against
   // the runtime matching this manifest's ecosystem.
-  const runtimeTarget = registryEco ? opts.runtimes?.[ecosystem === 'npm' ? 'node' : 'python'] : undefined;
+  const RUNTIME_OF: Partial<Record<Ecosystem, RuntimeName>> = { npm: 'node', PyPI: 'python' };
+  const runtimeName = RUNTIME_OF[ecosystem];
+  const runtimeTarget = runtimeName ? opts.runtimes?.[runtimeName] : undefined;
 
   // Only frameworks actually present (by anchor package, e.g. `expo`, `next`) may claim
   // lockstep members — `react` in a Next-only manifest is not "Expo-coordinated" (#18).
-  const frameworks = presentFrameworks(directNames);
+  const frameworks = presentFrameworks(directNames, ecosystem);
 
   // Typosquat heuristic (offline) up-front, so download counts can put numbers behind any hit.
   // Only deps a human chose (direct) — transitive names are registry-real.
@@ -174,7 +184,7 @@ export async function analyzeManifest(manifest: Manifest, opts: AnalyzeOptions =
       dev: d.dev,
       direct,
       vulns: vulnMap.get(`${d.name}@${d.version}`) ?? [],
-      lockstep: lockstepFor(d.name, frameworks),
+      lockstep: lockstepFor(d.name, frameworks, ecosystem),
       latest: info?.latest,
       lastPublish: info?.lastPublish,
       // Registry self-declared license first; deps.dev's detected SPDX (under --health) fills gaps.
@@ -342,6 +352,26 @@ function describeSources(args: {
       detail: mutable
         ? `${mutable} of ${findings.length} uses pinned to a mutable tag/branch — pin commit SHAs`
         : `all ${findings.length} uses pinned to full commit SHAs`,
+    });
+    return sources;
+  }
+
+  // Non-registry ecosystems (RubyGems today) get OSV + KEV/EPSS + the offline lockstep registry.
+  // Say so explicitly rather than dropping the rows: "what did this run actually check?" is the
+  // whole point of the ledger, and silence reads as coverage.
+  if (!REGISTRY_ECOSYSTEMS.has(ecosystem)) {
+    const pinned = findings.filter((f) => f.lockstep.pinned).length;
+    sources.push({
+      name: 'framework lockstep (offline)',
+      status: 'ok',
+      detail: pinned
+        ? `${pinned} of ${findings.length} package(s) are framework-coordinated`
+        : `no framework-coordinated packages among ${findings.length}`,
+    });
+    sources.push({
+      name: `${ecosystem} registry`,
+      status: 'skipped',
+      detail: 'freshness, health, downloads + runtime checks are not implemented for this ecosystem yet',
     });
     return sources;
   }

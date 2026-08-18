@@ -32,17 +32,15 @@ import {
   renderRepoIssue,
   repoFailCount,
   ISSUE_MARKER,
+  LOCKFILE,
+  MANIFEST,
   MARKER,
   type ManifestReport,
   type SkippedManifest,
 } from './report';
 
-// package.json / requirements*.txt anywhere in the tree, plus GitHub Actions workflow files
-// (their `uses:` entries are scanned against OSV's "GitHub Actions" ecosystem).
-const MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
-// A lockfile-only change still moves the installed tree (transitive adds/bumps) —
-// it must trigger the scan of its sibling manifest too (dogfood BUG-3/#20).
-const LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
+// Which files are manifests / lockfiles lives in report.ts (pure + unit-tested) — this module
+// is octokit glue and carries no tests of its own.
 const LOCKFILE_NAMES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'] as const;
 
 type Octokit = ReturnType<typeof github.getOctokit>;
@@ -79,6 +77,16 @@ async function run(): Promise<void> {
 
   const mode = core.getInput('mode') || 'pr';
 
+  // `ignore-paths`: comma-separated globs of manifests to exclude, in BOTH modes. Intentionally-
+  // vulnerable demo/fixture manifests (this repo's own test corpus included) would otherwise fail
+  // every PR that touches them and drown the scheduled issue in noise. Default empty — a user's
+  // manifest is never silently skipped, and every exclusion is announced in the comment/issue.
+  const ignoreGlobs = core
+    .getInput('ignore-paths')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+
   // PR mode: a policy file is authoritative and fail-level is ignored — say so, or a vuln-less
   // policy silently stops gating CVEs even though fail-level looks set (mirrors the CLI). Repo
   // mode doesn't apply the policy's `failOn` rules, so fail-level still drives its severity
@@ -92,9 +100,18 @@ async function run(): Promise<void> {
     // but don't fail) and `runtimes` — NOT the `failOn` rules, which are PR-introduces-X semantics.
     // `fail-level` sets the severity a finding must meet to FAIL the run (default `cve` = any);
     // everything is still listed in the tracking issue regardless.
-    await runRepoScan(octokit, owner, repo, failOnCve, resolveRuntimes(policy), policy?.allow?.advisories ?? [], failLevel);
+    await runRepoScan(
+      octokit,
+      owner,
+      repo,
+      failOnCve,
+      resolveRuntimes(policy),
+      policy?.allow?.advisories ?? [],
+      failLevel,
+      ignoreGlobs,
+    );
   } else {
-    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy);
+    await runPrScan(octokit, owner, repo, failOnCve, failLevel, policy, ignoreGlobs);
   }
 }
 
@@ -105,7 +122,8 @@ async function runPrScan(
   repo: string,
   failOnCve: boolean,
   failLevel: string,
-  policy?: Policy,
+  policy: Policy | undefined,
+  ignoreGlobs: string[],
 ): Promise<void> {
   const pr = github.context.payload.pull_request;
   if (!pr) {
@@ -129,8 +147,18 @@ async function runPrScan(
     if (MANIFEST.test(f.filename)) manifestPaths.add(f.filename);
     else if (LOCKFILE.test(f.filename)) manifestPaths.add(join(dirname(f.filename), 'package.json'));
   }
+  // Excluded manifests never reach the gate — but they ARE reported, in the log and in the
+  // sticky comment, so a green check can't quietly mean "we didn't look".
+  const ignored = ignoreGlobs.length ? [...manifestPaths].filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
+  for (const p of ignored) manifestPaths.delete(p);
+  if (ignored.length > 0) {
+    core.info(`Ignoring ${ignored.length} manifest(s) via ignore-paths: ${ignored.join(', ')}`);
+  }
   if (manifestPaths.size === 0) {
     core.info('No dependency manifests or lockfiles changed in this PR.');
+    // Still post/refresh the comment when something was excluded — otherwise a PR whose only
+    // manifest change was an ignored fixture shows a stale comment or none at all.
+    if (ignored.length > 0) await upsertComment(octokit, owner, repo, issue_number, renderComment([], [], ignored));
     return;
   }
 
@@ -167,6 +195,7 @@ async function runPrScan(
   // Only truly-nothing-to-do is a clean no-op: no changed manifests AND nothing failed to scan.
   if (results.length === 0 && skipped.length === 0) {
     core.info('No added or bumped dependencies to report.');
+    if (ignored.length > 0) await upsertComment(octokit, owner, repo, issue_number, renderComment([], [], ignored));
     return;
   }
 
@@ -184,7 +213,7 @@ async function runPrScan(
     owner,
     repo,
     issue_number,
-    renderComment(results, skipped) +
+    renderComment(results, skipped, ignored) +
       renderPolicySection(policyResult.violations, policyResult.suppressed),
   );
   core.setOutput('new-cves', newCveCount(results));
@@ -216,15 +245,8 @@ async function runRepoScan(
   runtimes: AnalyzeOptions['runtimes'],
   allowAdvisories: string[],
   failLevel: string,
+  ignoreGlobs: string[],
 ): Promise<void> {
-  // `ignore-paths`: comma-separated globs for manifests the scheduled scan should not report on
-  // (e.g. intentionally-vulnerable demo/fixture files that would drown real findings in noise).
-  // Default empty — never silently skip a user's manifest. Every exclusion is announced below.
-  const ignoreGlobs = core
-    .getInput('ignore-paths')
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
   const all = findManifests('.');
   const ignored = ignoreGlobs.length ? all.filter((p) => matchesAnyGlob(p, ignoreGlobs)) : [];
   const paths = all.filter((p) => !ignored.includes(p));
