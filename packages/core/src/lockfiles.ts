@@ -164,6 +164,129 @@ function parseYarnV1(text: string): LockGraph {
 }
 
 // ---------------------------------------------------------------------------------------------
+// go.mod (Go modules)
+//
+// Also self-contained: since Go 1.17 the `require` list is the full pruned module graph, with
+// `// indirect` marking anything the main module doesn't import directly. (go.sum is NOT a graph
+// source — it hashes candidate modules that were never selected, so scanning it reports versions
+// the build does not use.)
+//
+// Scope notes (deliberate):
+// - `replace` is applied: a module replaced by another module@version is scanned as the
+//   REPLACEMENT (that's the code that gets built); a module replaced by a local path is dropped
+//   entirely (local code, and its import path could collide with a real module's advisories).
+//   Per the module reference, a replace only takes effect when the left side is actually required.
+// - `exclude` / `retract` are ignored — neither adds a module to the build.
+// - Versions are passed through verbatim, `v` prefix and `+incompatible` included. Verified live
+//   2026-08-18 that OSV accepts all forms (`v0.7.0` == `0.7.0`, `3.2.0+incompatible` == `3.2.0`).
+// - `dev: false` everywhere — Go has no dev-dependency concept in go.mod.
+
+/** `toolchain go1.21.5` -> `1.21.5`. */
+function toolchainVersion(raw: string): string | undefined {
+  return raw.trim().match(/^go(\d+(?:\.\d+)*)$/)?.[1];
+}
+
+/** A `require` entry: `module/path v1.2.3 [// indirect]`. */
+function parseRequire(body: string): Dependency | undefined {
+  const indirect = /\/\/\s*indirect\b/.test(body);
+  const code = body.split('//')[0]?.trim() ?? '';
+  const m = code.match(/^(\S+)\s+(\S+)$/);
+  if (!m) return undefined;
+  return { name: m[1]!, range: m[2]!, version: m[2]!, dev: false, direct: !indirect };
+}
+
+/**
+ * Parse a `go.mod` into the module graph.
+ *
+ * The Go standard library is reported as the module `stdlib` (OSV's pseudo-module, same name
+ * govulncheck uses) — but ONLY from a `toolchain` directive. That directive names the toolchain
+ * that will actually build the module. The bare `go` directive is a *minimum*, which libraries
+ * deliberately hold low for compatibility, so treating it as the build version would report every
+ * such library as carrying the whole backlog of stdlib CVEs. `describeSources` says out loud when
+ * stdlib went unchecked for that reason, rather than leaving the gap silent.
+ */
+export function parseGoMod(content: string): Dependency[] {
+  const deps = new Map<string, Dependency>();
+  /** `old module path` -> replacement (`undefined` = replaced by a local path, i.e. dropped). */
+  const replacements = new Map<string, { name: string; version: string } | undefined>();
+  let toolchain: string | undefined;
+  let block: 'require' | 'replace' | 'other' | undefined;
+
+  const addRequire = (body: string): void => {
+    const dep = parseRequire(body);
+    // Keep the first entry for a path: go.mod lists each module once, and a duplicate would be
+    // a malformed file rather than a second version to scan.
+    if (dep && !deps.has(dep.name)) deps.set(dep.name, dep);
+  };
+
+  const addReplace = (body: string): void => {
+    const [left, right] = body.split('=>');
+    if (!left || right === undefined) return;
+    const from = left.trim().split(/\s+/)[0];
+    if (!from) return;
+    const to = right.trim().split(/\s+/);
+    const target = to[0];
+    if (!target) return;
+    // A local path (`./x`, `../x`, `/abs`) replaces the module with code in this repo — the
+    // version is omitted by the spec, and the path is not a scannable module.
+    if (/^\.{0,2}\//.test(target)) {
+      replacements.set(from, undefined);
+      return;
+    }
+    const version = to[1];
+    if (!version) return; // a module replacement must carry a version — malformed otherwise
+    replacements.set(from, { name: target, version });
+  };
+
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('//')) continue;
+
+    if (block) {
+      if (trimmed === ')') {
+        block = undefined;
+        continue;
+      }
+      if (block === 'require') addRequire(trimmed);
+      else if (block === 'replace') addReplace(trimmed);
+      continue;
+    }
+
+    const open = trimmed.match(/^(require|replace|exclude|retract)\s*\($/);
+    if (open) {
+      const kind = open[1];
+      block = kind === 'require' ? 'require' : kind === 'replace' ? 'replace' : 'other';
+      continue;
+    }
+    if (trimmed.startsWith('require ')) addRequire(trimmed.slice('require '.length));
+    else if (trimmed.startsWith('replace ')) addReplace(trimmed.slice('replace '.length));
+    else if (trimmed.startsWith('toolchain ')) toolchain = toolchainVersion(trimmed.slice('toolchain '.length));
+  }
+
+  for (const [from, to] of replacements) {
+    const original = deps.get(from);
+    if (!original) continue; // "A replace directive has no effect if the left side is not required"
+    deps.delete(from);
+    if (!to) continue; // replaced by local code
+    if (deps.has(to.name)) continue;
+    deps.set(to.name, {
+      name: to.name,
+      range: to.version,
+      version: to.version,
+      dev: false,
+      direct: original.direct,
+    });
+  }
+
+  const out = [...deps.values()];
+  if (toolchain) {
+    out.unshift({ name: 'stdlib', range: toolchain, version: toolchain, dev: false, direct: true });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Gemfile.lock (Bundler)
 //
 // Unlike npm/pnpm/yarn, this file is BOTH the manifest and the lockfile: it carries the resolved

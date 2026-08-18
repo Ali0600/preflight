@@ -110,7 +110,7 @@ interface Declared {
  * so a name silently missing from it is a whole ecosystem going unscanned while the check
  * reports green. Mirrors `ecosystemFor` in core's manifest.ts — extend both together. */
 export const MANIFEST =
-  /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+  /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 
 /** npm-family lockfiles. A lockfile-only change still moves the installed tree (transitive
  * adds/bumps), so it must trigger a scan of its sibling package.json too (dogfood BUG-3/#20).

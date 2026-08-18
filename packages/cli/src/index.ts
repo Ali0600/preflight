@@ -250,7 +250,7 @@ program
 
 program
   .command('check')
-  .argument('[path]', 'path to package.json, requirements*.txt, Gemfile.lock or a workflow', 'package.json')
+  .argument('[path]', 'path to package.json, requirements*.txt, Gemfile.lock, go.mod or a workflow', 'package.json')
   .option('--json', 'output the raw report as JSON')
   .option('--sbom [file]', 'emit a CycloneDX SBOM (to <file>, or stdout if omitted)')
   .option('--latest', "fetch each dep's latest version + last-publish date (enables 'stale')")

@@ -37,6 +37,9 @@ const POPULAR: Record<Ecosystem, string[]> = {
   // careless entry turns a legitimate gem into a false warning. Populate it (from a real
   // rubygems.org download ranking) in the same change that enables it, not before.
   RubyGems: [],
+  // Empty for the same reason as RubyGems — and Go module paths are host-qualified
+  // (`github.com/owner/repo`), so a lookalike is an owner/repo edit, not a bare-name one.
+  Go: [],
 };
 
 /** Normalize separators so `cross_env`/`cross.env` compare against `cross-env`. Scopes are kept:
@@ -51,6 +54,7 @@ const NORM: Record<Ecosystem, Set<string>> = {
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
   actions: new Set(POPULAR.actions.map(normalize)),
   RubyGems: new Set(POPULAR.RubyGems.map(normalize)),
+  Go: new Set(POPULAR.Go.map(normalize)),
 };
 
 /** True iff the Damerau-Levenshtein distance between a and b is exactly 1 (incl. one transposition). */

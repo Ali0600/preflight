@@ -24,6 +24,7 @@ const PURL_SYS: Record<Ecosystem, string> = {
   PyPI: 'pypi',
   actions: 'github',
   RubyGems: 'gem',
+  Go: 'golang',
 };
 
 /** Package URL (purl) for a finding, e.g. `pkg:npm/left-pad@1.3.0`. */

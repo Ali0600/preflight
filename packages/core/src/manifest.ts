@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { parse as parseYaml } from 'yaml';
 
-import { enumeratePnpmGraph, enumerateYarnGraph, parseGemfileLock } from './lockfiles';
+import { enumeratePnpmGraph, enumerateYarnGraph, parseGemfileLock, parseGoMod } from './lockfiles';
 import type { Dependency, Ecosystem, Manifest } from './types';
 
 /** A GitHub Actions workflow file: `*.yml`/`*.yaml` under `.github/workflows/`. Matched on the
@@ -19,14 +19,15 @@ function ecosystemFor(path: string): Ecosystem {
   if (f === 'package.json') return 'npm';
   if (f.startsWith('requirements') && f.endsWith('.txt')) return 'PyPI';
   if (f === 'gemfile.lock') return 'RubyGems';
+  if (f === 'go.mod') return 'Go';
   throw new Error(
-    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, or .github/workflows/*.yml)`,
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, go.mod, or .github/workflows/*.yml)`,
   );
 }
 
 /** Ecosystems whose manifest file IS the lockfile — the text alone yields resolved versions for
  * the whole graph, so there's no sibling lockfile to look for and `lockfile` is always true. */
-const SELF_LOCKED: ReadonlySet<Ecosystem> = new Set<Ecosystem>(['RubyGems']);
+const SELF_LOCKED: ReadonlySet<Ecosystem> = new Set<Ecosystem>(['RubyGems', 'Go']);
 
 /**
  * Parse manifest *text* (no filesystem access) into a flat dep list — used to read a base-ref
@@ -41,6 +42,7 @@ export function parseManifestContent(filename: string, content: string): Manifes
     PyPI: parsePip,
     actions: parseWorkflow,
     RubyGems: parseGemfileLock,
+    Go: parseGoMod,
   };
   const dependencies = parse[ecosystem](content);
   // Content-only parsing never sees a *sibling* lockfile (`parseManifest` upgrades npm when one

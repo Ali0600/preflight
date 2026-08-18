@@ -94,7 +94,10 @@ async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
   const req = fetchFile(repo, `${prefix}requirements.txt`);
   // Gemfile.lock is self-contained (it IS the resolved graph), so there's no sibling to fetch.
   const gems = fetchFile(repo, `${prefix}Gemfile.lock`);
-  if (!pkg && !req && !gems) return [];
+  // go.mod likewise carries the full pruned module graph (go.sum does not — it hashes
+  // candidates that were never selected).
+  const gomod = fetchFile(repo, `${prefix}go.mod`);
+  if (!pkg && !req && !gems && !gomod) return [];
 
   const out: Scan[] = [];
   const tmp = mkdtempSync(join(tmpdir(), 'preflight-'));
@@ -112,6 +115,10 @@ async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
     if (gems) {
       writeFileSync(join(tmp, 'Gemfile.lock'), gems);
       out.push({ repo, manifest: `${prefix}Gemfile.lock`, report: await analyze(join(tmp, 'Gemfile.lock')) });
+    }
+    if (gomod) {
+      writeFileSync(join(tmp, 'go.mod'), gomod);
+      out.push({ repo, manifest: `${prefix}go.mod`, report: await analyze(join(tmp, 'go.mod')) });
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

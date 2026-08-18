@@ -564,6 +564,8 @@ describe('MANIFEST / LOCKFILE discovery patterns', () => {
       'services/api/requirements.txt',
       'Gemfile.lock',
       'engines/billing/Gemfile.lock',
+      'go.mod',
+      'services/api/go.mod',
       '.github/workflows/ci.yml',
       '.github/workflows/release.yaml',
     ]) {
@@ -574,6 +576,7 @@ describe('MANIFEST / LOCKFILE discovery patterns', () => {
   it('ignores lookalikes', () => {
     for (const p of [
       'Gemfile', // requirements only — no resolved versions to scan (core rejects it too)
+      'go.sum', // hashes modules that were never selected — not a graph source
       'package.json.bak',
       'docs/package.json.md',
       'requirements.md',
