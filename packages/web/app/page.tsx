@@ -69,6 +69,7 @@ export default function Page() {
             <option value="requirements.txt">requirements.txt (pip)</option>
             <option value="Gemfile.lock">Gemfile.lock (RubyGems)</option>
             <option value="go.mod">go.mod (Go)</option>
+            <option value="Cargo.lock">Cargo.lock (crates.io)</option>
           </select>
           <label className="check">
             <input type="checkbox" checked={health} onChange={(e) => setHealth(e.target.checked)} />
@@ -76,7 +77,7 @@ export default function Page() {
           </label>
           {/* Runtime installability is only checked for ecosystems with a registry client
               (npm/PyPI) — hide the box rather than take a target the scan would ignore. */}
-          {filename !== 'Gemfile.lock' && filename !== 'go.mod' && (
+          {!['Gemfile.lock', 'go.mod', 'Cargo.lock'].includes(filename) && (
             <input
               className="select"
               style={{ width: 150 }}

@@ -54,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     console.error('preflight /api/analyze failed:', err);
     return Response.json(
-      { error: 'Could not analyze the manifest — ensure it is a valid package.json, requirements.txt, Gemfile.lock or go.mod.' },
+      { error: 'Could not analyze the manifest — ensure it is a valid package.json, requirements.txt, Gemfile.lock, go.mod or Cargo.lock.' },
       { status: 400 },
     );
   }

@@ -72,7 +72,7 @@ export async function analyzeContent(
 /** Which uploaded file to treat as THE manifest in `analyzeFiles`. Workflow files are excluded
  * on purpose: a caller posting a repo's files should get its package graph scanned, not one of
  * its CI workflows (scan those by pointing `analyze` straight at the path). */
-const SCANNABLE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod)$/i;
+const SCANNABLE_MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod|Cargo\.lock)$/i;
 
 /**
  * Analyze an in-memory set of manifest files. Writes them to a throwaway temp dir so the npm
@@ -100,7 +100,7 @@ export async function analyzeFiles(
       writeFileSync(p, content);
       if (SCANNABLE_MANIFEST.test(name)) manifestPath ??= p;
     }
-    if (!manifestPath) throw new Error('No package.json, requirements*.txt, Gemfile.lock or go.mod among the files');
+    if (!manifestPath) throw new Error('No package.json, requirements*.txt, Gemfile.lock, go.mod or Cargo.lock among the files');
     return await analyze(manifestPath, opts);
   } finally {
     rmSync(dir, { recursive: true, force: true });

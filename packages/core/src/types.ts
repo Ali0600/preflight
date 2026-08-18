@@ -9,7 +9,7 @@
  * Only `npm`/`PyPI` are REGISTRY ecosystems (see `REGISTRY_ECOSYSTEMS`) — the others get OSV
  * (+ KEV/EPSS) and lockstep only; registry-style lookups (latest/health/runtimes/downloads)
  * don't apply to them. */
-export type Ecosystem = 'npm' | 'PyPI' | 'actions' | 'RubyGems' | 'Go';
+export type Ecosystem = 'npm' | 'PyPI' | 'actions' | 'RubyGems' | 'Go' | 'crates.io';
 
 /** Ecosystems with a package registry behind them, i.e. where `--latest`/`--health`,
  * download counts, runtime-compat and the typosquat corpus mean something. Everything else

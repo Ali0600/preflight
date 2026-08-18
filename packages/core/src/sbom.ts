@@ -25,6 +25,7 @@ const PURL_SYS: Record<Ecosystem, string> = {
   actions: 'github',
   RubyGems: 'gem',
   Go: 'golang',
+  'crates.io': 'cargo',
 };
 
 /** Package URL (purl) for a finding, e.g. `pkg:npm/left-pad@1.3.0`. */

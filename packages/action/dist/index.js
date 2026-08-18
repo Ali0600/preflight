@@ -31688,6 +31688,76 @@ function parseYarnV1(text) {
   }
   return { all, bySpec };
 }
+function cargoDepName(entry) {
+  return entry.trim().replace(/^"|",?$/g, "").trim().split(/\s+/)[0] || void 0;
+}
+function cargoString(line, key) {
+  const m = line.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*$`));
+  return m?.[1];
+}
+function parseCargoLock(content) {
+  const packages = [];
+  let current;
+  let inDepsArray = false;
+  for (const raw of content.split("\n")) {
+    const line = raw.replace(/\r$/, "").trim();
+    if (!line || line.startsWith("#")) continue;
+    if (inDepsArray) {
+      if (line.startsWith("]")) {
+        inDepsArray = false;
+        continue;
+      }
+      const name = cargoDepName(line);
+      if (name && current) current.deps.push(name);
+      continue;
+    }
+    if (line === "[[package]]") {
+      current = { deps: [] };
+      packages.push(current);
+      continue;
+    }
+    if (line.startsWith("[")) {
+      current = void 0;
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith("dependencies")) {
+      const inline = line.match(/^dependencies\s*=\s*\[(.*)\]\s*$/);
+      if (inline) {
+        for (const e of inline[1].split(",")) {
+          const name = cargoDepName(e);
+          if (name) current.deps.push(name);
+        }
+      } else if (/^dependencies\s*=\s*\[\s*$/.test(line)) {
+        inDepsArray = true;
+      }
+      continue;
+    }
+    current.name ??= cargoString(line, "name");
+    current.version ??= cargoString(line, "version");
+    current.source ??= cargoString(line, "source");
+  }
+  const local = packages.filter((p) => p.name && !p.source);
+  const localNames = new Set(local.map((p) => p.name));
+  const directNames = new Set(local.flatMap((p) => p.deps).filter((n) => !localNames.has(n)));
+  const noLocalCrates = local.length === 0;
+  const deps = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const p of packages) {
+    if (!p.name || !p.version || !p.source) continue;
+    const id = `${p.name}@${p.version}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    deps.push({
+      name: p.name,
+      range: "",
+      version: p.version,
+      dev: false,
+      direct: noLocalCrates || directNames.has(p.name)
+    });
+  }
+  return deps;
+}
 function toolchainVersion(raw) {
   return raw.trim().match(/^go(\d+(?:\.\d+)*)$/)?.[1];
 }
@@ -31850,11 +31920,12 @@ function ecosystemFor(path) {
   if (f.startsWith("requirements") && f.endsWith(".txt")) return "PyPI";
   if (f === "gemfile.lock") return "RubyGems";
   if (f === "go.mod") return "Go";
+  if (f === "cargo.lock") return "crates.io";
   throw new Error(
-    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, go.mod, or .github/workflows/*.yml)`
+    `Unsupported manifest: ${path} (expected package.json, requirements*.txt, Gemfile.lock, go.mod, Cargo.lock, or .github/workflows/*.yml)`
   );
 }
-var SELF_LOCKED = /* @__PURE__ */ new Set(["RubyGems", "Go"]);
+var SELF_LOCKED = /* @__PURE__ */ new Set(["RubyGems", "Go", "crates.io"]);
 function parseManifestContent(filename, content) {
   const ecosystem = ecosystemFor(filename);
   const parse4 = {
@@ -31862,7 +31933,8 @@ function parseManifestContent(filename, content) {
     PyPI: parsePip,
     actions: parseWorkflow,
     RubyGems: parseGemfileLock,
-    Go: parseGoMod
+    Go: parseGoMod,
+    "crates.io": parseCargoLock
   };
   const dependencies = parse4[ecosystem](content);
   return {
@@ -32258,7 +32330,9 @@ var OSV_ECOSYSTEM = {
   RubyGems: "RubyGems",
   // Same live check: gin@1.9.0 -> 2 advisories, golang.org/x/net@v0.7.0 -> 23,
   // stdlib@1.21.0 -> 75, and a patched release -> 0.
-  Go: "Go"
+  Go: "Go",
+  // Same live check: openssl@0.10.0 -> 18 advisories, smallvec@0.6.9 -> 9, serde@1.0.200 -> 0.
+  "crates.io": "crates.io"
 };
 var OSV_BATCH = 1e3;
 function chunk(arr, size) {
@@ -32755,7 +32829,8 @@ var POPULAR = {
   RubyGems: [],
   // Empty for the same reason as RubyGems — and Go module paths are host-qualified
   // (`github.com/owner/repo`), so a lookalike is an owner/repo edit, not a bare-name one.
-  Go: []
+  Go: [],
+  "crates.io": []
 };
 function normalize(name) {
   return name.replace(/[_.]/g, "-").toLowerCase();
@@ -32765,7 +32840,8 @@ var NORM = {
   PyPI: new Set(POPULAR.PyPI.map(normalize)),
   actions: new Set(POPULAR.actions.map(normalize)),
   RubyGems: new Set(POPULAR.RubyGems.map(normalize)),
-  Go: new Set(POPULAR.Go.map(normalize))
+  Go: new Set(POPULAR.Go.map(normalize)),
+  "crates.io": new Set(POPULAR["crates.io"].map(normalize))
 };
 function isOneEditApart(a, b) {
   if (a === b || Math.abs(a.length - b.length) > 1) return false;
@@ -34028,7 +34104,7 @@ function renderPolicySection(violations, suppressed = []) {
   }
   return lines.join("\n");
 }
-var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
+var MANIFEST = /(^|\/)(package\.json|requirements[\w.-]*\.txt|Gemfile\.lock|go\.mod|Cargo\.lock)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i;
 var LOCKFILE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
 var MARKER = "<!-- preflight-action -->";
 var ISSUE_MARKER = "<!-- preflight-scheduled -->";

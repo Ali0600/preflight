@@ -178,6 +178,59 @@ describe('parseManifest — Go (go.mod)', () => {
   });
 });
 
+describe('parseManifest — Rust (Cargo.lock)', () => {
+  const m = parseManifest(fixture('rust/Cargo.lock'));
+  const dep = (name: string) => m.dependencies.find((d) => d.name === name);
+
+  it('reads every crates.io package with its resolved version', () => {
+    expect(m.ecosystem).toBe('crates.io');
+    expect(m.lockfile).toBe(true);
+    expect(dep('openssl')?.version).toBe('0.10.0');
+    expect(dep('libc')?.version).toBe('0.2.155');
+  });
+
+  it('skips workspace-local crates (no `source`) but uses their edges for `direct`', () => {
+    // `myapp` and `myapp-core` are crates in this repo — their names are arbitrary and must not
+    // inherit advisories from same-named crates.io packages.
+    expect(dep('myapp')).toBeUndefined();
+    expect(dep('myapp-core')).toBeUndefined();
+    // Depended on by a local crate = a human chose it.
+    expect(dep('openssl')?.direct).toBe(true);
+    expect(dep('serde')?.direct).toBe(true);
+    expect(dep('smallvec')?.direct).toBe(true); // via the second local crate, not the root
+    // Only reachable through another crates.io package.
+    expect(dep('libc')?.direct).toBe(false);
+  });
+
+  it('scans git-sourced crates (a fork of a real crate is still that crate)', () => {
+    expect(dep('vendored-fork')).toMatchObject({ version: '2.0.0', direct: true });
+  });
+
+  it('keeps both versions when a crate appears twice', () => {
+    // Two majors legitimately coexist in a Rust build; each needs its own advisory check.
+    const dups = m.dependencies.filter((d) => d.name === 'dup').map((d) => d.version);
+    expect(dups.sort()).toEqual(['1.0.0', '2.0.0']);
+  });
+
+  it('ignores [metadata] and other non-package tables', () => {
+    expect(dep('legacy')).toBeUndefined();
+    expect(m.dependencies.some((d) => d.name.startsWith('checksum'))).toBe(false);
+  });
+
+  it('parses an INLINE dependencies array (a local crate uses one)', () => {
+    // `myapp-cli` declares `dependencies = ["dup 1.0.0"]` on one line — if that form were
+    // skipped, `dup` would silently drop to transitive. Asserting a crate merely *exists* would
+    // not detect it, since every crate has its own [[package]] block regardless of edges.
+    expect(dep('dup')?.direct).toBe(true);
+  });
+
+  it('reads the legacy fully-qualified dependency form', () => {
+    // Cargo.lock v1/v2 write `"name version (source)"` rather than a bare name. If only the
+    // first token isn't taken, the edge never matches a package and directness is lost.
+    expect(dep('smallvec')?.direct).toBe(true);
+  });
+});
+
 describe('parseManifest — unsupported', () => {
   it('throws on an unknown manifest', () => {
     // A bare Gemfile carries requirements but no resolved versions — only the lock is scannable.

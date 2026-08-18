@@ -97,7 +97,8 @@ async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
   // go.mod likewise carries the full pruned module graph (go.sum does not — it hashes
   // candidates that were never selected).
   const gomod = fetchFile(repo, `${prefix}go.mod`);
-  if (!pkg && !req && !gems && !gomod) return [];
+  const cargo = fetchFile(repo, `${prefix}Cargo.lock`);
+  if (!pkg && !req && !gems && !gomod && !cargo) return [];
 
   const out: Scan[] = [];
   const tmp = mkdtempSync(join(tmpdir(), 'preflight-'));
@@ -119,6 +120,10 @@ async function scanDir(repo: string, prefix: string): Promise<Scan[]> {
     if (gomod) {
       writeFileSync(join(tmp, 'go.mod'), gomod);
       out.push({ repo, manifest: `${prefix}go.mod`, report: await analyze(join(tmp, 'go.mod')) });
+    }
+    if (cargo) {
+      writeFileSync(join(tmp, 'Cargo.lock'), cargo);
+      out.push({ repo, manifest: `${prefix}Cargo.lock`, report: await analyze(join(tmp, 'Cargo.lock')) });
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });

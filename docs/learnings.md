@@ -423,3 +423,22 @@ lacked resolved versions.
 not which one is largest, most authoritative-sounding, or most often committed. A file listing
 candidates produces false positives; a file listing requirements produces silent misses. Both read
 as a successful scan.
+
+## A mutation pattern that matches twice sabotages the wrong function
+
+Mutation-testing the new `Cargo.lock` parser, one mutant reported NOT CAUGHT for a case the test
+clearly covered. The mutation was `const id = \`${p.name}@${p.version}\`` → `const id = p.name`,
+and that exact line exists **twice** in the file: once in the shared pnpm/yarn `assemble()` helper
+and once in the Cargo parser. `String.replace(str, str)` replaces the *first* match, so the harness
+had been sabotaging a completely different parser and then reporting a verdict about this one. The
+harness now refuses to run any mutant whose pattern occurs more than once, and the mutants are
+anchored on a neighbouring line unique to the function under test.
+
+**Why it came up:** a survivor that made no sense, in a parser whose test demonstrably asserted the
+behaviour.
+
+**Takeaway:** a mutation harness must assert *where* the edit landed, not just that it landed —
+count the matches and fail loudly on ambiguity. Generalises to any find-and-replace over source:
+`sed`, codemods, "rename this string". When a mutant survives a test you are sure covers it,
+suspect the aim before the test. (Sharpens the existing entry on equivalent mutants: same symptom,
+opposite cause — one means the code is equivalent, the other means you never mutated it.)
