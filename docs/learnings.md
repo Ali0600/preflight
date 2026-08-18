@@ -442,3 +442,36 @@ count the matches and fail loudly on ambiguity. Generalises to any find-and-repl
 `sed`, codemods, "rename this string". When a mutant survives a test you are sure covers it,
 suspect the aim before the test. (Sharpens the existing entry on equivalent mutants: same symptom,
 opposite cause — one means the code is equivalent, the other means you never mutated it.)
+
+## Before trusting a namespace prefix, check that the namespace is actually uniform
+
+Adding "these packages must move together" entries for Prisma, Storybook, tRPC and Sentry, the
+obvious rule for each was a scope prefix — `@prisma/`, `@sentry/`. Querying the registry for the
+actual latest versions killed half of them: `@sentry/cli` is 3.6.2, `@sentry/webpack-plugin` and
+`@sentry/vite-plugin` are 5.4.0, `@sentry/conventions` is 0.19.0 — while the SDK is 10.70.0. Same
+for `@prisma/dev` (0.25.1) and `@prisma/studio-core` (0.33.0) against Prisma's 7.9.1. A prefix rule
+would have told people to hold back build tooling that has nothing to do with the SDK's release
+train. Storybook and tRPC *are* uniform, so prefixes are right there — and `@trpc/client` even
+declares `peerDependencies: { "@trpc/server": "11.18.0" }`, an exact pin.
+
+**Why it came up:** growing a curated registry whose whole value is being right.
+
+**Takeaway:** a shared scope/namespace is a publishing convention, not a versioning contract.
+Before writing a prefix rule (or any "everything under X behaves the same" rule), sample several
+members and compare them against the anchor — one counter-example turns the rule from advice into
+misinformation. Prefer an explicit list when the sample disagrees.
+
+## The absence of a constraint is the bug — look for what a package *doesn't* declare
+
+`@types/react@19` declares `peerDependencies: {}`. Nothing anywhere ties it to a React version, so
+npm resolves it beside `react@18` without a murmur and Dependabot bumps it as a routine update —
+after which the build stops type-checking (React 19's types removed the global JSX namespace and
+made `useRef` require an argument). Every metadata-driven check passes, because the metadata that
+would express the conflict does not exist.
+
+**Why it came up:** picking the strongest possible entry for a known-bad-pairs registry.
+
+**Takeaway:** when hunting for breakage a tool can't see, look for missing declarations rather than
+wrong ones — a package with no peer range, no engines field, no lockfile entry. Absence produces
+silence at every layer, which is exactly why it survives review, CI and auto-update bots alike. And
+when you find one, check the sibling: `@types/react-dom` had the identical gap.

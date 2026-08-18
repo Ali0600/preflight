@@ -32,6 +32,10 @@ export interface Policy {
     /** Fail when a workflow `uses:` an action pinned to a mutable tag/branch instead of a
      * full commit SHA (the tj-actions compromise vector). Only fires on actions manifests. */
     unpinnedAction?: boolean;
+    /** Fail when a direct dependency is installed beside a version it is documented to break
+     * with (`combos.ts`). Offline and free — and the one class no metadata can express, since
+     * the pair installs cleanly by every declared peer range. */
+    knownBadPair?: boolean;
   };
   /** Target runtimes the manifest must install on, e.g. { "python": "3.9", "node": "18" }.
    * Shared config-file home for the CLI/Action (flags override). */
@@ -151,6 +155,13 @@ export function evaluatePolicy(
     }
     if (rules.deprecated && f.deprecated) {
       violations.push({ rule: 'deprecated', dep: at, detail: f.deprecated });
+    }
+    if (rules.knownBadPair && f.knownBadPair) {
+      violations.push({
+        rule: 'known-bad-pair',
+        dep: at,
+        detail: `breaks beside ${f.knownBadPair.with} — ${f.knownBadPair.reason}`,
+      });
     }
     if (rules.unpinnedAction && f.mutableRef) {
       violations.push({

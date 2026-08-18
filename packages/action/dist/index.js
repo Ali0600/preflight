@@ -33024,6 +33024,95 @@ var FRAMEWORK_SETS = [
     anchors: ["astro"]
   },
   {
+    // Prisma's CLI warns at runtime — "Versions of prisma@X and @prisma/client@Y don't match.
+    // This might lead to unexpected behavior" — but `@prisma/client`'s peer range on `prisma` is
+    // literally `*`, so npm and Dependabot see no conflict at all. That gap is the whole point of
+    // this registry. Deliberately NO `@prisma/` prefix: verified 2026-08-18 that `@prisma/dev`
+    // (0.25.1) and `@prisma/studio-core` (0.33.0) sit off the 7.9.1 line, so a prefix would hand
+    // out false advice about packages Prisma does not coordinate.
+    framework: "Prisma",
+    tool: "bump prisma and @prisma/client to the same version together",
+    exact: ["prisma", "@prisma/client"],
+    prefixes: [],
+    anchors: ["prisma", "@prisma/client"]
+  },
+  {
+    // Every Storybook package rides the monorepo version: `@storybook/react@10.5.9` peers
+    // `storybook: ^10.5.9` and pins `@storybook/react-dom-shim@10.5.9` exactly (verified, as is
+    // `@storybook/addon-docs@10.5.9`). Bumping the core without the addons is the classic break.
+    framework: "Storybook",
+    tool: "npx storybook@latest upgrade",
+    exact: ["storybook"],
+    prefixes: ["@storybook/"],
+    anchors: ["storybook"]
+  },
+  {
+    // The strongest evidence of any entry here: `@trpc/client` declares
+    // `peerDependencies: { "@trpc/server": "11.18.0" }` — an EXACT pin, not a range.
+    framework: "tRPC",
+    tool: "bump all @trpc/* to the same version",
+    exact: [],
+    prefixes: ["@trpc/"],
+    anchors: ["@trpc/server", "@trpc/client"]
+  },
+  {
+    // Sentry's own migration guide: "make sure to upgrade all of them to the same version", and
+    // `@sentry/node@10.70.0` pins `@sentry/core`/`@sentry/node-core`/`@sentry/server-utils` at
+    // 10.70.0 exactly. But NO `@sentry/` prefix — verified 2026-08-18 that the build-tool and
+    // internal packages version independently (`@sentry/cli` 3.6.2, `@sentry/webpack-plugin` and
+    // `@sentry/vite-plugin` 5.4.0, `@sentry/conventions` 0.19.0), so a prefix would wrongly tell
+    // people to hold those back. The SDK runtimes are listed explicitly instead.
+    framework: "Sentry",
+    tool: "bump all Sentry SDK packages to the same version",
+    exact: [
+      "@sentry/core",
+      "@sentry/browser",
+      "@sentry/node",
+      "@sentry/react",
+      "@sentry/vue",
+      "@sentry/angular",
+      "@sentry/svelte",
+      "@sentry/sveltekit",
+      "@sentry/nextjs",
+      "@sentry/nuxt",
+      "@sentry/remix",
+      "@sentry/astro",
+      "@sentry/solid",
+      "@sentry/solidstart",
+      "@sentry/bun",
+      "@sentry/deno",
+      "@sentry/nestjs",
+      "@sentry/aws-serverless",
+      "@sentry/cloudflare",
+      "@sentry/vercel-edge",
+      "@sentry/opentelemetry",
+      "@sentry/profiling-node",
+      "@sentry/react-router",
+      "@sentry/google-cloud-serverless"
+    ],
+    prefixes: [],
+    anchors: [
+      "@sentry/browser",
+      "@sentry/node",
+      "@sentry/react",
+      "@sentry/vue",
+      "@sentry/angular",
+      "@sentry/svelte",
+      "@sentry/sveltekit",
+      "@sentry/nextjs",
+      "@sentry/nuxt",
+      "@sentry/remix",
+      "@sentry/astro",
+      "@sentry/solid",
+      "@sentry/bun",
+      "@sentry/deno",
+      "@sentry/nestjs",
+      "@sentry/aws-serverless",
+      "@sentry/cloudflare",
+      "@sentry/react-router"
+    ]
+  },
+  {
     // The textbook lockstep set: the `rails` gem declares every component at `= X.Y.Z` exactly
     // (verified against the rubygems API for both 7.1.3 and 8.1.3.1 — all 12 components `=`,
     // while `bundler` is `>= 1.15.0` and is therefore NOT a member). Bumping one component on
@@ -33137,6 +33226,12 @@ function decideVerdict(f) {
   if (f.runtimeCompat?.rangeUnsatisfiable || f.runtimeCompat?.resolvedIncompatible) {
     return { verdict: "incompatible", reason: incompatibleReason(f, f.runtimeCompat) };
   }
+  if (f.knownBadPair) {
+    return {
+      verdict: "incompatible",
+      reason: `Known-bad pair with ${f.knownBadPair.with} \u2014 ${f.knownBadPair.reason}`
+    };
+  }
   if (f.deprecated) {
     const msg = f.deprecated.length > 120 ? `${f.deprecated.slice(0, 117)}\u2026` : f.deprecated;
     const tail = f.lockstep.pinned ? ` \xB7 framework-pinned (${f.lockstep.framework}) \u2014 fix via ${f.lockstep.tool}` : "";
@@ -33229,6 +33324,13 @@ function evaluatePolicy(findings, policy, context3 = {}) {
     }
     if (rules.deprecated && f.deprecated) {
       violations.push({ rule: "deprecated", dep: at, detail: f.deprecated });
+    }
+    if (rules.knownBadPair && f.knownBadPair) {
+      violations.push({
+        rule: "known-bad-pair",
+        dep: at,
+        detail: `breaks beside ${f.knownBadPair.with} \u2014 ${f.knownBadPair.reason}`
+      });
     }
     if (rules.unpinnedAction && f.mutableRef) {
       violations.push({
@@ -33680,6 +33782,68 @@ function detectRuntimes(dir) {
   return out;
 }
 
+// ../core/src/combos.ts
+var KNOWN_BAD_COMBOS = [
+  {
+    // Dogfood T5 / issue #31: crashes at lint time (`contextOrFilename.getFilename is
+    // not a function`) — eslint-config-next ≤16's vendored eslint-plugin-react calls an
+    // API ESLint 10 removed, and its `eslint >=9` peer range wrongly admits 10. `<17`
+    // assumes the next major fixes it: revisit when eslint-config-next 17 ships.
+    ecosystem: "npm",
+    subject: "eslint",
+    subjectBroken: ">=10",
+    subjectFallback: "<10",
+    with: "eslint-config-next",
+    withRange: "<17",
+    reason: "eslint-config-next \u226416's vendored plugin calls an API ESLint 10 removed (crashes at lint time; the upstream eslint peer range doesn't exclude 10)"
+  },
+  {
+    // `@types/react@19` declares `peerDependencies: {}` — verified 2026-08-18 — so NOTHING ties
+    // it to a React version and npm/Dependabot see no conflict when it is bumped alone. But the
+    // v19 types removed the global JSX namespace, made `useRef` require an initial argument, and
+    // deleted `React.VFC`/`ReactText`/`ReactChild` (DefinitelyTyped discussion #64451), so a
+    // React 18 codebase stops type-checking. The purest form of what this registry is for: no
+    // metadata anywhere in the ecosystem can express it.
+    ecosystem: "npm",
+    subject: "@types/react",
+    subjectBroken: ">=19",
+    subjectFallback: "<19",
+    with: "react",
+    withRange: "<19",
+    reason: "@types/react 19 dropped the global JSX namespace and requires a useRef argument \u2014 React 18 code stops compiling (the types package declares no peer range, so nothing blocks the bump)"
+  },
+  {
+    // Same story for the DOM types, which are bumped as a pair with @types/react.
+    ecosystem: "npm",
+    subject: "@types/react-dom",
+    subjectBroken: ">=19",
+    subjectFallback: "<19",
+    with: "react-dom",
+    withRange: "<19",
+    reason: "@types/react-dom 19 targets the React 19 client/server APIs \u2014 React 18 code stops compiling (the types package declares no peer range, so nothing blocks the bump)"
+  }
+];
+function findComboConflicts(deps, ecosystem) {
+  const found = /* @__PURE__ */ new Map();
+  if (ecosystem !== "npm") return found;
+  const versionOf = /* @__PURE__ */ new Map();
+  for (const d of deps) {
+    if (d.direct === false || !d.version) continue;
+    if (!versionOf.has(d.name)) versionOf.set(d.name, d.version);
+  }
+  for (const combo of KNOWN_BAD_COMBOS) {
+    if (combo.ecosystem !== ecosystem) continue;
+    if (found.has(combo.subject)) continue;
+    const subjectVersion = versionOf.get(combo.subject);
+    const withVersion = versionOf.get(combo.with);
+    if (!subjectVersion || !withVersion) continue;
+    if (satisfies(subjectVersion, combo.subjectBroken) !== true) continue;
+    if (satisfies(withVersion, combo.withRange) !== true) continue;
+    found.set(combo.subject, { with: `${combo.with}@${withVersion}`, reason: combo.reason });
+  }
+  return found;
+}
+
 // ../core/src/sbom.ts
 var import_node_module = require("module");
 
@@ -33770,6 +33934,7 @@ async function analyzeManifest(manifest, opts = {}) {
   const runtimeName = RUNTIME_OF[ecosystem];
   const runtimeTarget = runtimeName ? opts.runtimes?.[runtimeName] : void 0;
   const frameworks = presentFrameworks(directNames, ecosystem);
+  const comboConflicts = findComboConflicts(dependencies, ecosystem);
   const squatHits = /* @__PURE__ */ new Map();
   for (const name of directNames) {
     const similarTo = typosquatOf(name, ecosystem);
@@ -33824,6 +33989,9 @@ async function analyzeManifest(manifest, opts = {}) {
       // Adoption display for deps you chose, under --health.
       downloadsPerWeek: direct && opts.health ? downloadsMap?.get(d.name) : void 0,
       mutableRef: d.mutableRef,
+      // A pair that installs cleanly and breaks together (combos.ts) — precomputed over the
+      // whole dep list, since it is a property of the COMBINATION, not of this package alone.
+      knownBadPair: comboConflicts.get(d.name),
       runtimeCompat: runtimeMeta ? computeRuntimeCompat({ range: d.range, version: d.version }, runtimeMeta, runtimeTarget, ecosystem) : void 0
     };
     const { verdict, reason } = decideVerdict(base);
@@ -33946,6 +34114,14 @@ function describeSources(args) {
       detail: "freshness, health, downloads + runtime checks are not implemented for this ecosystem yet"
     });
     return sources;
+  }
+  if (ecosystem === "npm") {
+    const pairs = findings.filter((f) => f.knownBadPair).length;
+    sources.push({
+      name: "known-bad pairs (offline)",
+      status: "ok",
+      detail: pairs ? `${pairs} package(s) installed beside a version they break with` : "no known-bad version pairs among the direct dependencies"
+    });
   }
   const deprecatedCount = findings.filter((f) => f.deprecated).length;
   sources.push(

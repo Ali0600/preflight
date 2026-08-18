@@ -257,3 +257,33 @@ describe('evaluatePolicy — eol-runtime rule (report-level)', () => {
     expect(evaluatePolicy([], {}, { runtimeEol: eol }).fail).toBe(false);
   });
 });
+
+describe('evaluatePolicy — known-bad-pair rule', () => {
+  const pair = {
+    with: 'react@18.3.1',
+    reason: '@types/react 19 dropped the global JSX namespace',
+  };
+  const f = () =>
+    finding({ name: '@types/react', knownBadPair: pair, verdict: 'incompatible' });
+
+  it('fails only when failOn.knownBadPair is set', () => {
+    expect(evaluatePolicy([f()], { failOn: {} }).fail).toBe(false);
+    const on = evaluatePolicy([f()], { failOn: { knownBadPair: true } });
+    expect(on.fail).toBe(true);
+    expect(on.violations[0]).toMatchObject({ rule: 'known-bad-pair', dep: '@types/react@1.0.0' });
+    expect(on.violations[0]!.detail).toContain('react@18.3.1');
+  });
+
+  it('does not fire on a package with no pair', () => {
+    const clean = finding({ name: 'lodash', verdict: 'safe' });
+    expect(evaluatePolicy([clean], { failOn: { knownBadPair: true } }).fail).toBe(false);
+  });
+
+  it('needs no extra fetches — the check is offline', () => {
+    expect(policyNeeds({ failOn: { knownBadPair: true } })).toEqual({
+      latest: false,
+      health: false,
+      runtime: false,
+    });
+  });
+});

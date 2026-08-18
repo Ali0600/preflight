@@ -284,3 +284,34 @@ describe('decideVerdict — deprecated', () => {
     expect(r.reason).toContain('…');
   });
 });
+
+describe('decideVerdict — known-bad pairs (combos.ts)', () => {
+  const pair = { with: 'react@18.3.1', reason: 'types dropped the global JSX namespace' };
+  const base = { name: '@types/react', range: '^19', version: '19.2.18', dev: true, vulns: [], lockstep: { pinned: false } };
+
+  it('a known-bad pair -> incompatible, naming the other half and why', () => {
+    const r = decideVerdict({ ...base, knownBadPair: pair });
+    expect(r.verdict).toBe('incompatible');
+    expect(r.reason).toContain('react@18.3.1');
+    expect(r.reason).toContain('global JSX namespace');
+  });
+
+  it('without the pair the same package is safe', () => {
+    // Pins that the verdict comes from the PAIR, not from anything else about the package.
+    expect(decideVerdict(base).verdict).toBe('safe');
+  });
+
+  it('a CVE still outranks a known-bad pair', () => {
+    const r = decideVerdict({ ...base, vulns: med, knownBadPair: pair });
+    expect(r.verdict).toBe('cve');
+  });
+
+  it('a known-bad pair outranks pinned and stale advice', () => {
+    const r = decideVerdict({
+      ...base,
+      knownBadPair: pair,
+      lockstep: { pinned: true, framework: 'Expo', tool: 'npx expo install' },
+    });
+    expect(r.verdict).toBe('incompatible');
+  });
+});

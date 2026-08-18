@@ -79,9 +79,17 @@ no install, no account.
   OSV vulnerability database, and classifies each dependency as `safe` / `pinned` / `cve` / `stale`.
   Keyless, deterministic, and cached on disk (24h) to respect rate limits.
 - **Framework-lockstep detection** — a data-driven registry that flags packages a framework pins
-  as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro, and **Rails**, whose gem
-  declares all 12 components at `= X.Y.Z`), the failure mode generic auto-updaters
-  (Dependabot/Renovate) can't see — with the exact upgrade command to use instead.
+  as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro, **Prisma**, **Storybook**,
+  **tRPC**, **Sentry**, and **Rails**, whose gem declares all 12 components at `= X.Y.Z`), the
+  failure mode generic auto-updaters (Dependabot/Renovate) can't see — with the exact upgrade
+  command to use instead. Every entry is transcribed from the framework's own manifest or docs,
+  and namespaces are only claimed where they're genuinely uniform: `@sentry/cli` and
+  `@prisma/dev` version independently, so they're deliberately left out.
+- **Known-bad version pairs** — two packages that install cleanly by every declared peer range and
+  break *together*. The canonical case: `@types/react@19` declares **no peer dependency at all**,
+  so npm and Dependabot happily bump it beside `react@18` — and the build stops type-checking.
+  No metadata anywhere in the ecosystem expresses this; it's a curated, evidence-backed list
+  (`combos.ts`), reported by `check` and gateable via `failOn.knownBadPair`.
 - **Severity + health enrichment** — maps GHSA labels and computes CVSS v3 base scores for
   advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev
   **plus build provenance**: a 🔏 badge when the version ships a *verified* attestation (npm

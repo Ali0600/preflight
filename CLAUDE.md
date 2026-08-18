@@ -93,9 +93,21 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
     *within* a registry, so without the tag the `rails` gem would claim npm projects (and
     `--framework rails` would seed an npm plan with gem names). Rails is the RubyGems entry:
     13 `exact` members, **no prefixes** (`activerecord-import` etc. are unrelated namespaces),
-    `bundler` excluded (rails declares it `>= 1.15.0`, not `=`).
+    `bundler` excluded (rails declares it `>= 1.15.0`, not `=`). npm same-version sets: **Prisma**
+    (exact pair only — `@prisma/dev`/`@prisma/studio-core` sit off the version line), **Storybook**
+    and **tRPC** (uniform namespaces, so `@storybook/`/`@trpc/` prefixes are safe — `@trpc/client`
+    peers `@trpc/server` at an EXACT version), **Sentry** (exact SDK list, **no prefix**:
+    `@sentry/cli` 3.x, `@sentry/webpack-plugin`/`@sentry/vite-plugin` 5.x and `@sentry/conventions`
+    0.x all version independently of the SDK's 10.x). **Verify a namespace is uniform before using
+    a prefix** — check several members' latest versions against the anchor's.
   - `combos.ts` — known-bad version *pairs* (break together despite peer ranges admitting each
-    other, e.g. eslint 10 × eslint-config-next ≤16 — #31). `plan` holds the subject back to the
+    other, e.g. eslint 10 × eslint-config-next ≤16 — #31; `@types/react` ≥19 × react <19, whose
+    types package declares **no peer range at all**, so nothing in the ecosystem can flag it).
+    Two entry points: `findComboHolds` (plan — reasons about versions it's about to recommend)
+    and **`findComboConflicts`** (check — over *installed, resolved, direct* deps; a range is not
+    a fact about what's installed, and a transitive pair isn't yours to fix). A hit sets
+    `Finding.knownBadPair` → `incompatible` verdict (below cve, above pinned/stale) and is
+    gateable via policy `failOn.knownBadPair` (offline, so `policyNeeds` is unchanged). `plan` holds the subject back to the
     newest known-good runtime-compatible release + dependabot-ignores the boundary. Data-driven
     like lockstep; entries must be documented breakages (strict `satisfies === true` matching —
     never fire on "can't tell")
