@@ -15,6 +15,14 @@ already have, it returns the full `Report` (incl. the transitive graph). Preflig
 your repo, so there's no token on its side. (You may also see `/api/analyze` in the app's network
 tab — that's the dashboard UI's own paste-form route; embedders should use `/api/scan`.)
 
+> **Which endpoint?** Use `/api/scan` whenever *you* already hold the files — it's the embedding
+> contract, it works for private code, and Preflight makes no outbound request to fetch anything.
+> There is also `POST /api/repo` (`{ "url": "owner/repo" }` → `{ "reports": [...] }`), which
+> fetches a **public** repo's manifests from raw.githubusercontent.com itself. It powers the
+> dashboard's URL box and is handy for a quick one-off, but it only sees public repos and spends a
+> network round trip per candidate file — if your integration already has the manifest content,
+> `/api/scan` is strictly better.
+
 ```bash
 curl -X POST "$PREFLIGHT_URL/api/scan" -H 'content-type: application/json' \
   -d '{"files":{"package.json":"…","package-lock.json":"…"}}'

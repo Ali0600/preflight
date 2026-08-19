@@ -37,7 +37,9 @@ _Not yet: transitive-dep counts ("+N transitive") and per-line PR annotations �
       `transpilePackages`.
 - [x] `--latest` always on (version transitions like `0.85.3 → 0.86.0`); an "Include OpenSSF health"
       toggle drives the health-grade card. Exact-pinned npm deps are CVE-checked without a lockfile.
-- [ ] Connect a repo via GitHub OAuth (deferred config, per spec) — the paste flow is the MVP.
+- [x] Connect a repo — **shipped without OAuth**: paste a public GitHub URL and `/api/repo` fetches
+      the manifests off raw.githubusercontent.com (keyless, API-less). Private repos still need
+      OAuth and remain deferred.
 - [x] Deploy on Vercel — live at https://preflight-web.vercel.app (auto-deploys on push to `main`).
 
 Acceptance: paste an Expo `package.json` → the mockup view, live ✓ (verified locally; screenshot in PR).

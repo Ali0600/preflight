@@ -475,3 +475,37 @@ would express the conflict does not exist.
 wrong ones — a package with no peer range, no engines field, no lockfile entry. Absence produces
 silence at every layer, which is exactly why it survives review, CI and auto-update bots alike. And
 when you find one, check the sibling: `@types/react-dom` had the identical gap.
+
+## Never fetch a user-supplied URL — parse it into pieces and rebuild it
+
+The GitHub-URL scan takes an arbitrary string from an anonymous caller on a public endpoint and
+ends up making an outbound HTTP request. The whole safety of that hinges on one rule: the pasted
+string is *never* fetched. It's split into `owner`/`repo`/`ref`/`dir` segments, each validated
+against GitHub's own naming charsets, and the URL is then **rebuilt** from a hardcoded origin plus
+those segments. Parsing is deliberately string-only — no `new URL(input)` — because URL parsers
+are full of quirks (userinfo, backslash normalisation, unicode host mapping) that can hand you a
+host you didn't intend, and `https://github.com@evil.com/o/r` is a host of `evil.com`. Paired with
+`redirect: 'error'`, so a redirect can't move the request to a URL we never constructed.
+
+**Why it came up:** adding "paste a GitHub link and scan it" to the public dashboard.
+
+**Takeaway:** the SSRF-safe shape for "fetch something the user named" is *parse → validate each
+component → reconstruct*, never *sanitise the string and fetch it*. A denylist of bad prefixes is
+the wrong instrument; an allowlist charset per component is the right one, because it defines what
+can be expressed rather than enumerating what's forbidden.
+
+## Distinguishing "absent" from "unavailable" is what stops an outage reading as an all-clear
+
+`raw.githubusercontent.com` returns a bare 404 for a file that doesn't exist — and the same bare
+404 for a repo that's private or nonexistent. So 404 has to mean "absent" and drive the scan on.
+Every *other* non-OK status (429, 403, 5xx) and every timeout must instead fail the whole request
+closed with a 502, because "we couldn't reach GitHub" must never render as "this repo has no
+manifests to worry about". The same reasoning forbids silently degrading when a lockfile fetch
+fails beside a present `package.json`: reporting the direct deps only would look like a clean,
+complete scan of a much smaller tree.
+
+**Why it came up:** deciding the fetch loop's error policy for the repo-scan endpoint.
+
+**Takeaway:** in any fetch-many-optional-things loop, write down which status codes mean *absent*
+and which mean *unknown* before writing the loop — and make "unknown" loud. A missing thing and an
+unreachable thing produce the same empty result, and only one of them is safe to proceed from.
