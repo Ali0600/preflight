@@ -52,8 +52,11 @@ git clone https://github.com/Ali0600/preflight && cd preflight && npm install
 npm run check -- path/to/package.json        # or requirements*.txt, Gemfile.lock, go.mod, Cargo.lock
 ```
 
-**Or paste a manifest in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
-no install, no account.
+**Or scan it in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
+no install, no account: paste a manifest, or paste a **public GitHub repo URL** and Preflight
+fetches the manifests itself (`owner/repo`, a `/tree/<branch>/<subdir>` URL for a monorepo
+package, or a `/blob/` URL pointed straight at one manifest). A repo carrying several manifests
+gets one report each.
 
 **Supported manifests:** `package.json` (npm), `requirements*.txt` (pip), `Gemfile.lock`
 (RubyGems), `go.mod` (Go), `Cargo.lock` (Rust), and `.github/workflows/*.yml` (GitHub Actions).

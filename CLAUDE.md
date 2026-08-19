@@ -161,7 +161,24 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - `packages/web` (`@preflight/web`) — Stage 3 Next.js App Router dashboard: paste a manifest →
   `/api/analyze` (`analyzeContent()`) → metric cards + findings, matching `docs/dashboard-mockup.html`.
   Also `POST /api/scan` (`analyzeFiles()`, keyless — caller posts manifest+lockfile, `maxDuration=60`
-  for Vercel) and `GET /api/health` for **embedding** (docs/integration.md). Engine via
+  for Vercel) and `GET /api/health` for **embedding** (docs/integration.md). **`POST /api/repo`** —
+  paste a PUBLIC GitHub URL, the route fetches the manifests itself off `raw.githubusercontent.com`
+  (`HEAD` resolves the default branch, so no API call is needed to learn it) and returns
+  `{reports: Report[]}` — one per manifest found, since `analyzeFiles` only scans the FIRST match
+  it's handed. **API-less on purpose**: the GitHub API's 60/hr unauthenticated budget is per-IP,
+  i.e. shared by every visitor of the deployment, so the route probes a FIXED candidate list
+  (5 manifests + 3 npm lockfiles, ≤8 GETs) instead of listing a directory. Pure parsing lives in
+  `app/api/repo/github.ts` (zero imports, unit-tested in `packages/web/tests/` — root vitest picks
+  it up with no config): the pasted string is **never fetched** — it's split into segments
+  validated against GitHub's charset rules, and the URL is REBUILT from a hardcoded origin, which
+  is what stops a public endpoint from being an SSRF proxy (plus `redirect: 'error'`, per-file 5MB
+  / total 8MB streamed caps, 8s timeouts, static parse-error strings that never reflect input).
+  A 404 means "absent" — GitHub gives the same 404 for a private/nonexistent repo, so the
+  not-found copy says both; any OTHER upstream status fails closed (502), because an outage must
+  not read as "this repo has no manifests". The route rewrites `report.path` to
+  `owner/repo/<file>@<ref>` (the engine returns its temp path) and appends a GitHub row to
+  `Report.sources`. Passes `latest: true` + the health flag for parity with `/api/analyze` (same
+  Dashboard renders both); passes NO `runtimes` — the ecosystem isn't known until after the fetch. Engine via
   `transpilePackages`; excluded from root eslint/tsc (self-checks via `next build`); `output:standalone`
   + `Dockerfile` for self-host. **Deployed on Vercel** (preflight-web.vercel.app). Repo-OAuth deferred.
 

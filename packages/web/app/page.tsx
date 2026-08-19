@@ -18,36 +18,62 @@ export default function Page() {
   const [content, setContent] = useState(SAMPLE_PACKAGE_JSON);
   const [health, setHealth] = useState(false);
   const [runtime, setRuntime] = useState('');
-  const [report, setReport] = useState<Report | null>(null);
+  const [repoUrl, setRepoUrl] = useState('');
+  // A repo can carry several manifests (a package.json AND a Gemfile.lock), so the result is a
+  // list; the paste flow simply returns a list of one.
+  const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function run() {
+  // One submit path for both flows so their loading/error handling can't drift apart.
+  async function submit(endpoint: string, body: unknown) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/analyze', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ filename, content, health, runtime }),
+        body: JSON.stringify(body),
       });
-      const data = (await res.json()) as Report & { error?: string };
+      const data = (await res.json()) as { reports?: Report[]; error?: string } & Report;
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
-      setReport(data);
+      setReports(Array.isArray(data.reports) ? data.reports : [data as Report]);
     } catch (e) {
       setError((e as Error).message);
-      setReport(null);
+      setReports([]);
     } finally {
       setLoading(false);
     }
   }
+
+  const run = () => submit('/api/analyze', { filename, content, health, runtime });
+  const runRepo = () => submit('/api/repo', { url: repoUrl, health });
 
   return (
     <>
       <div className="header">
         <i className="ti ti-shield-check" aria-hidden />
         <span className="header-title">Preflight</span>
-        <span className="header-sub">· paste a manifest, pre-flight its dependencies</span>
+        <span className="header-sub">· paste a manifest or a GitHub repo, pre-flight its dependencies</span>
+      </div>
+
+      <div className="form">
+        <div className="controls">
+          <input
+            className="select"
+            style={{ flex: 1, minWidth: 220 }}
+            value={repoUrl}
+            placeholder="Public GitHub repo — owner/repo, or a /tree/ or /blob/ URL"
+            aria-label="GitHub repository URL"
+            onChange={(e) => setRepoUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && repoUrl.trim() && !loading) runRepo();
+            }}
+          />
+          <button className="btn" onClick={runRepo} disabled={loading || !repoUrl.trim()}>
+            {loading ? 'Pre-flighting…' : 'Scan repo'}
+          </button>
+        </div>
       </div>
 
       <div className="form">
@@ -95,7 +121,9 @@ export default function Page() {
       </div>
 
       {error && <div className="error">{error}</div>}
-      {report && <Dashboard report={report} />}
+      {reports.map((r) => (
+        <Dashboard key={r.path} report={r} />
+      ))}
     </>
   );
 }
