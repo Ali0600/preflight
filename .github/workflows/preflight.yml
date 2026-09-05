@@ -23,6 +23,8 @@ jobs:
       # Third-party actions pinned to full commit SHAs (a tag is mutable) — Dependabot bumps them.
       # The local `./packages/action` is first-party (runs from this repo's committed bundle).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: preflight
         uses: ./packages/action
         with:
