@@ -19,11 +19,16 @@ jobs:
     steps:
       # Third-party actions pinned to full commit SHAs (a tag is mutable) — Dependabot bumps them.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-          cache: npm
+          # No dependency cache on the PUBLISHING job. A cache entry is writable by any run on
+          # any branch, so restoring one here lets a poisoned entry reach the tarball that goes
+          # to npm. This runs on a tag a handful of times a month; a cold install is cheap
+          # insurance against publishing something a PR run put in the cache.
       - run: npm ci
       - run: npm run lint && npm run typecheck && npm test
       - run: npm run build
