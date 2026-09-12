@@ -4,21 +4,24 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Keyless](https://img.shields.io/badge/data%20sources-keyless-brightgreen)](#keyless-to-run)
 
-> Pre-flight a dependency **before** you add or auto-update it — known CVEs, health, and whether
-> it's actually safe to bump given your framework.
+> Check a dependency **before** you add it or let a bot bump it. Preflight reports known CVEs
+> (publicly listed security flaws), package health, and whether your framework lets you bump it
+> at all.
 
-Most tools (Dependabot, Snyk, Socket) analyze the dependencies you *already have*. Preflight
+Most tools — Dependabot, Snyk, Socket — look at the dependencies you *already have*. Preflight
 answers the question that bites you *earlier*: **"is this safe to add, and safe to auto-update?"**
-Its edge is a **framework-lockstep registry** — it knows that Expo, Angular, Nx, Next.js, Nuxt,
-SvelteKit, Remix, and Astro each pin a coordinated set of packages, so it tells you to bump those
-via the framework's own tool (`npx expo install`, `npx nuxi upgrade`, …) instead of letting a
-per-package updater break your build.
+
+What makes it different is the **framework-lockstep registry**. Expo, Angular, Nx, Next.js, Nuxt,
+SvelteKit, Remix, and Astro each pin a set of packages that has to move together. Preflight spots
+those and tells you to bump them with the framework's own tool (`npx expo install`,
+`npx nuxi upgrade`, …). A per-package updater would bump one of them on its own and break your
+build.
 
 ## Use it
 
-**Gate your pull requests (GitHub Action)** — the fastest way in. On every PR it diffs the whole
-dependency tree (lockfile included) and fails the check on anything the PR introduces that carries
-a known CVE:
+**Check every pull request (GitHub Action)** — the fastest way in. On every PR it diffs the whole
+dependency tree, lockfile included. The check fails on anything the PR adds that carries a known
+CVE:
 
 ```yaml
 # .github/workflows/preflight.yml
@@ -38,12 +41,14 @@ jobs:
         #   policy-file: preflight.config.json
 ```
 
-Add a weekly re-scan (catches CVEs disclosed *after* a dep was merged) with a second workflow using
-`mode: repo` on a cron — see [.github/workflows/preflight-schedule.yml](.github/workflows/preflight-schedule.yml).
-`fail-level` applies there too, and it's worth tuning: a cron gates nothing, so `fail-level: kev`
-reports **every** finding to the tracking issue and the Security tab while only turning the run red
-on a confirmed-exploited CVE — otherwise an advisory wave in already-merged deps keeps the schedule
-permanently red until upstream ships fixes. The PR gate stays strict on anything new.
+Add a weekly re-scan with a second workflow. It runs `mode: repo` on a cron and catches CVEs
+disclosed *after* a dependency was merged — see
+[.github/workflows/preflight-schedule.yml](.github/workflows/preflight-schedule.yml).
+`fail-level` applies there too, and it is worth tuning. A cron run gates nothing, so
+`fail-level: kev` reports **every** finding to the tracking issue and the Security tab while only
+turning the run red on a confirmed-exploited CVE. Otherwise a wave of new advisories in deps you
+already merged keeps the schedule permanently red until upstream ships fixes. The PR gate stays
+strict on anything new.
 
 **Run the CLI locally** — not yet on npm (coming), so run it from a clone:
 
@@ -53,95 +58,97 @@ npm run check -- path/to/package.json        # or requirements*.txt, Gemfile.loc
 ```
 
 **Or scan it in the browser** — [preflight-web.vercel.app](https://preflight-web.vercel.app),
-no install, no account: paste a manifest, or paste a **public GitHub repo URL** and Preflight
-fetches the manifests itself (`owner/repo`, a `/tree/<branch>/<subdir>` URL for a monorepo
-package, or a `/blob/` URL pointed straight at one manifest). A repo carrying several manifests
-gets one report each.
+no install, no account. Paste a manifest, or paste the URL of a **public GitHub repo** and
+Preflight fetches the manifests itself. It takes `owner/repo`, a `/tree/<branch>/<subdir>` URL for
+one package in a monorepo, or a `/blob/` URL pointed straight at a single manifest. A repo that
+carries several manifests gets one report each.
 
 **Supported manifests:** `package.json` (npm), `requirements*.txt` (pip), `Gemfile.lock`
 (RubyGems), `go.mod` (Go), `Cargo.lock` (Rust), and `.github/workflows/*.yml` (GitHub Actions).
 
-> **Coverage note:** JavaScript scans always include the full lockfile tree —
+> **Coverage note:** JavaScript scans always read the full lockfile tree —
 > **`package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`** (classic v1 and berry) are all parsed.
-> Ruby is scanned straight from `Gemfile.lock`, which already carries the resolved version of
-> every installed gem (point Preflight at the *lock*, not the `Gemfile` — only the lock has
-> versions to check). Go is scanned from `go.mod`, which since Go 1.17 lists the full pruned
-> module graph (`go.sum` is deliberately **not** used — it hashes candidate modules that were
-> never selected, so scanning it reports versions your build doesn't use). The Go **standard
-> library** is checked when a `toolchain` directive names the toolchain that will build the
-> module; a bare `go` directive is only a *minimum*, so inferring the build version from it
-> would report every compatibility-minded library as carrying the whole stdlib CVE backlog —
-> the scan says so explicitly instead of guessing. Rust is scanned from `Cargo.lock` (formats
-> v1–v4); crates with no `source` are workspace-local, so they're excluded from advisory
-> matching while still defining which crates count as direct. pip has no standard lockfile, so a `requirements.txt` scan covers exactly
-> the versions listed in it; for transitive coverage, scan a fully-pinned file (`pip freeze` or
-> pip-tools' `requirements.txt` output).
+> Ruby is read straight from `Gemfile.lock`, which already carries the resolved version of every
+> installed gem. Point Preflight at the *lock* file, not the `Gemfile` — only the lock has
+> versions to check. Go is read from `go.mod`, which since Go 1.17 lists the full pruned module
+> graph. `go.sum` is deliberately **not** used: it hashes candidate modules that were never
+> selected, so scanning it reports versions your build does not use. The Go **standard library**
+> is checked when a `toolchain` directive names the toolchain that will build the module. A bare
+> `go` directive is only a *minimum*, so working the build version out from it would report every
+> compatibility-minded library as carrying the whole stdlib CVE backlog — the scan says so
+> explicitly instead of guessing. Rust is read from `Cargo.lock` (formats v1–v4). Crates with no
+> `source` are workspace-local, so they are left out of advisory matching while still deciding
+> which crates count as direct. pip has no standard lockfile, so a `requirements.txt` scan covers
+> exactly the versions listed in it; for transitive coverage, scan a fully-pinned file
+> (`pip freeze` or pip-tools' `requirements.txt` output).
 
 ## Highlights
-- **Supply-chain pre-flight engine** — parses npm/pip/RubyGems/Go/Rust manifests, batches queries to the
-  OSV vulnerability database, and classifies each dependency as `safe` / `pinned` / `cve` / `stale`.
-  Keyless, deterministic, and cached on disk (24h) to respect rate limits.
-- **Framework-lockstep detection** — a data-driven registry that flags packages a framework pins
-  as a set (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro, **Prisma**, **Storybook**,
-  **tRPC**, **Sentry**, and **Rails**, whose gem declares all 12 components at `= X.Y.Z`), the
-  failure mode generic auto-updaters (Dependabot/Renovate) can't see — with the exact upgrade
-  command to use instead. Every entry is transcribed from the framework's own manifest or docs,
-  and namespaces are only claimed where they're genuinely uniform: `@sentry/cli` and
-  `@prisma/dev` version independently, so they're deliberately left out.
-- **Known-bad version pairs** — two packages that install cleanly by every declared peer range and
-  break *together*. The canonical case: `@types/react@19` declares **no peer dependency at all**,
+- **Supply-chain pre-flight engine** — reads npm, pip, RubyGems, Go and Rust manifests, sends
+  batched queries to the OSV vulnerability database, and labels each dependency `safe` / `pinned` /
+  `cve` / `stale`. It needs no key, gives the same answer every run, and caches to disk for 24h to
+  stay within rate limits.
+- **Framework-lockstep detection** — a data-driven registry of packages a framework pins as a set
+  (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix, Astro, **Prisma**, **Storybook**,
+  **tRPC**, **Sentry**, and **Rails**, whose gem declares all 12 components at `= X.Y.Z`). This is
+  the failure generic auto-updaters (Dependabot, Renovate) cannot see, and Preflight prints the
+  exact upgrade command to use instead. Every entry is copied from the framework's own manifest or
+  docs, and a namespace is only claimed where it is genuinely uniform: `@sentry/cli` and
+  `@prisma/dev` version independently, so they are deliberately left out.
+- **Known-bad version pairs** — two packages that install cleanly under every declared peer range
+  and break *together*. The classic case: `@types/react@19` declares **no peer dependency at all**,
   so npm and Dependabot happily bump it beside `react@18` — and the build stops type-checking.
-  No metadata anywhere in the ecosystem expresses this; it's a curated, evidence-backed list
+  Nothing in the ecosystem's metadata expresses this, so the list is curated and evidence-backed
   (`combos.ts`), reported by `check` and gateable via `failOn.knownBadPair`.
 - **Severity + health enrichment** — maps GHSA labels and computes CVSS v3 base scores for
-  advisories that ship only a vector; `--health` adds each dep's OpenSSF Scorecard from deps.dev
+  advisories that ship only a vector. `--health` adds each dep's OpenSSF Scorecard from deps.dev
   **plus build provenance**: a 🔏 badge when the version ships a *verified* attestation (npm
   Sigstore provenance / PyPI PEP 740) proving which repo and CI run actually built the artifact.
 - **Beyond known CVEs** — flags packages that run **install scripts** (npm's #1 supply-chain
-  vector), names that look like **typosquats** of popular packages (offline heuristic, then
+  vector), names that look like **typosquats** of popular packages (an offline check first, then
   **weekly download counts** put numbers behind the hunch: `resembles "lodash" (155M dl/wk) —
-  this package: 43 dl/wk — classic typosquat signature`), risky/unknown **licenses**, and weak
-  **OpenSSF Scorecard** checks — catching risk that has no CVE yet.
-- **GitHub Actions workflow scanning** — `.github/workflows/*.yml` files are manifests too: every
-  `uses:` is checked against OSV's *GitHub Actions* ecosystem (advisory ranges evaluated locally —
-  OSV doesn't do it server-side for actions), lookalike action names are flagged
-  (`action/checkout` vs `actions/checkout`), and any ref that isn't a **full commit SHA** gets a
-  mutable-ref warning — a moved tag swaps the code your CI runs (the tj-actions compromise vector).
+  this package: 43 dl/wk — classic typosquat signature`), risky or unknown **licenses**, and weak
+  **OpenSSF Scorecard** checks — risk that has no CVE yet.
+- **GitHub Actions workflow scanning** — `.github/workflows/*.yml` files are manifests too. Every
+  `uses:` is checked against OSV's *GitHub Actions* ecosystem, with advisory ranges evaluated
+  locally because OSV does not do it server-side for actions. Lookalike action names are flagged
+  (`action/checkout` vs `actions/checkout`), and any ref that is not a **full commit SHA** gets a
+  mutable-ref warning — a moved tag swaps the code your CI runs, which is the tj-actions
+  compromise vector.
 - **Deprecation surfacing** — under `--latest`, a dependency whose resolved version the maintainer
   deprecated (npm's `deprecated` notice) or **yanked from PyPI** gets its own `deprecated` verdict,
-  with the upstream message repeated verbatim — the "stop using this" signal `npm install` prints
-  once and CI never sees. Opt-in gate via `failOn: { "deprecated": true }`.
-- **Runtime-compatibility + EOL check** — declare the runtime the project actually runs on
-  (`--python 3.9` / `--node 18`, a `runtimes` key in the config, or auto-detected from
-  `.python-version`/`.nvmrc`) and Preflight flags dependencies whose range **cannot install
-  there** (`incompatible`), warns when the runtime itself is **past (or within 90 days of)
-  end-of-life** via endoflife.date — no dependency bump fixes a dead interpreter — plus an early
-  warning when the *newest* release dropped your runtime —
-  i.e. the next auto-bump will break. Catches the class of failure CI on a newer interpreter
-  can't: a floor like `uvicorn>=0.49` is green on Python 3.12 but uninstallable on the 3.9 dev
-  machine (`Requires-Python >=3.10`). Data: PyPI `Requires-Python` (hard install failure) and
-  npm `engines` (advisory), per version.
+  with the upstream message repeated word for word — the "stop using this" signal `npm install`
+  prints once and CI never sees. Turn it into a gate with `failOn: { "deprecated": true }`.
+- **Runtime-compatibility + EOL check** — tell Preflight which runtime the project actually runs
+  on (`--python 3.9` / `--node 18`, a `runtimes` key in the config, or auto-detected from
+  `.python-version`/`.nvmrc`). It then flags dependencies whose range **cannot install there**
+  (`incompatible`), and warns when the runtime itself is **past (or within 90 days of)
+  end-of-life** via endoflife.date — no dependency bump fixes a dead interpreter. You also get an
+  early warning when the *newest* release dropped your runtime, so the next auto-bump will break.
+  This catches the failure CI on a newer interpreter cannot: a floor like `uvicorn>=0.49` is green
+  on Python 3.12 but will not install on the 3.9 dev machine (`Requires-Python >=3.10`). Data:
+  PyPI `Requires-Python` (a hard install failure) and npm `engines` (advisory), per version.
 - **CI-gating** — exits non-zero on any CVE, so it drops straight into a pipeline.
-- **Three delivery surfaces, one engine** — a CLI (built to a standalone bundle with tsup), a
-  GitHub Action that gates PRs, and a web dashboard, all reusing `@preflight/core`.
+- **Three delivery surfaces, one engine** — a CLI (bundled standalone with tsup), a GitHub Action
+  that gates PRs, and a web dashboard. All three reuse `@preflight/core`.
 
 ## Stages
-1. **CLI** (`@preflight/cli`) — `preflight check <manifest>` → a verdict table (`safe` / `pinned` /
-   `cve` / `incompatible` / `stale`), with `--latest` (latest version + staleness), `--health`
-   (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime-compatibility),
-   `--fail-level <level>` (tune the exit-1 gate — same grammar as the Action: `cve` / `kev` /
+1. **CLI** (`@preflight/cli`) — `preflight check <manifest>` gives you a verdict table (`safe` /
+   `pinned` / `cve` / `incompatible` / `stale`). Flags: `--latest` (latest version and staleness),
+   `--health` (OpenSSF Scorecard), `--node <v>` / `--python <v>` (runtime compatibility),
+   `--fail-level <level>` (tune what exits 1 — same grammar as the Action: `cve` / `kev` /
    `epss:<0-1>` / `severity:<low|medium|high|critical>`), `--json`, and `--no-cache`.
    **Working today.**
-2. **GitHub Action** (`@preflight/action`) — on every PR, diffs the *whole dependency tree*
-   (manifest + lockfile, so lockfile-only PRs count) and posts a sticky comment; the gate fails
-   on anything the PR **introduces** — direct or transitive — that meets `fail-level` or violates
-   the policy. Pre-existing findings stay informational (the scheduled repo scan owns those).
+2. **GitHub Action** (`@preflight/action`) — on every PR it diffs the *whole dependency tree*
+   (manifest + lockfile, so lockfile-only PRs count) and posts a sticky comment. The gate fails on
+   anything the PR **introduces** — direct or transitive — that meets `fail-level` or breaks the
+   policy. Findings that were already there stay informational; the scheduled repo scan owns those.
    **Working today** ([.github/workflows/preflight.yml](.github/workflows/preflight.yml)).
-3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest → metric cards +
-   findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html), dark-mode aware.
-   **Live at [preflight-web.vercel.app](https://preflight-web.vercel.app)**. Also exposes a keyless
-   `POST /api/scan` (send a manifest + lockfile → full report) so other apps can embed it —
-   see [docs/integration.md](docs/integration.md). GitHub-repo OAuth is deferred.
+3. **Web dashboard** (`@preflight/web`, Next.js App Router) — paste a manifest and get metric cards
+   and a findings list matching [docs/dashboard-mockup.html](docs/dashboard-mockup.html),
+   dark-mode aware.
+   **Live at [preflight-web.vercel.app](https://preflight-web.vercel.app)**. It also exposes a
+   keyless `POST /api/scan` (send a manifest + lockfile, get the full report back) so other apps
+   can embed it — see [docs/integration.md](docs/integration.md). GitHub-repo OAuth is deferred.
 
 ## Quickstart
 ```bash
@@ -154,17 +161,18 @@ npm run dev -w @preflight/web               # the dashboard at http://localhost:
 npm run scan:repos                          # read-only sweep of all your GitHub repos (needs `gh`)
 ```
 
-`scan:repos` lists your repos via `gh`, pulls each manifest, and prints a ranked cross-repo report —
-it writes nothing to any repo. To gate repos going forward, see [docs/rollout.md](docs/rollout.md).
+`scan:repos` lists your repos via `gh`, pulls each manifest, and prints one ranked report across
+all of them. It writes nothing to any repo. To start gating repos, see
+[docs/rollout.md](docs/rollout.md).
 
-Example (an Expo app — everything Expo-pinned, nothing to auto-bump):
+Example — an Expo app, where everything is Expo-pinned and nothing should be auto-bumped:
 ```
 17 deps · 0 CVE · 10 pinned · 0 stale · 7 safe
  PINNED  react-native@0.85.3   Framework-pinned (Expo) — update via npx expo install
  SAFE    typescript@6.0.3      Independent — safe to auto-update (CI-gated)
 ```
 
-Example (a pip manifest with old pins — CI would fail on these):
+Example — a pip manifest with old pins. CI would fail on these:
 ```
 5 deps · 4 CVE · 0 pinned · 0 stale · 1 safe
  CVE     pyyaml@5.3.1 · latest 6.0.3    2 advisory · critical
@@ -174,10 +182,10 @@ Example (a pip manifest with old pins — CI would fail on these):
 
 ## Design-phase mode: `preflight plan`
 
-The checks above catch problems in an *existing* manifest. `preflight plan` moves them to the
-**start of a project** — pick the runtime the app will actually run on (and optionally a
-framework), list the packages you intend to use, and get the newest versions that install
-there plus the generated guardrails:
+The checks above find problems in a manifest you *already have*. `preflight plan` moves them to
+the **start of a project**. Pick the runtime the app will really run on, and a framework if you
+want one. List the packages you intend to use. You get back the newest versions that install
+there, plus the guardrail files:
 
 ```bash
 npm run plan -- --python 3.9 fastapi uvicorn httpx --dev pytest
@@ -199,33 +207,33 @@ uvicorn>=0.39.0,<0.40    # 0.40.0+ requires Python >=3.10 — capped
         versions: ['>=0.40']
 ```
 
-It emits the manifest (`requirements.txt` / `package.json` with an `engines` field) and a
-`dependabot.yml` with grouped weekly updates, an `ignore` at each runtime boundary, and — with
-`--framework` — the whole lockstep set ignored ("update with `npx expo install`, not
-per-package bumps"). Recommended versions are OSV-checked, so a floor that would pin onto a
-known CVE is flagged in the plan.
+It writes the manifest (`requirements.txt`, or `package.json` with an `engines` field) and a
+`dependabot.yml` that groups weekly updates and adds an `ignore` at each runtime boundary. With
+`--framework` it ignores the whole lockstep set ("update with `npx expo install`, not
+per-package bumps"). Recommended versions are checked against OSV, so the plan flags a floor that
+would pin you onto a known CVE.
 
 Plans are also checked against a registry of **known-bad pairs** — combinations whose declared
-peer ranges *admit* each other but that break together at runtime (e.g. `eslint@10` beside
-`eslint-config-next@16` crashes at lint time; the upstream peer range is simply wrong, so no
-metadata can reveal it). When a pair matches, the plan holds the package back to the newest
+peer ranges *admit* each other but that break together at runtime. For example, `eslint@10`
+beside `eslint-config-next@16` crashes at lint time; the upstream peer range is simply wrong, so
+no metadata can reveal it. When a pair matches, the plan holds the package back to the newest
 known-good version that still installs on your runtime, says why in the output, and adds a
-dependabot `ignore` at the boundary so the auto-updater can't reintroduce the pair. Like the
-lockstep registry, the list is data-driven and evidence-based — entries are documented
-breakages, never heuristics.
+dependabot `ignore` at the boundary so the auto-updater cannot bring the pair back. Like the
+lockstep registry, the list is data-driven and evidence-based — every entry is a documented
+breakage, never a heuristic.
 
 ## How it works
 `@preflight/core` is the single engine: `manifest` → `osv` + `lockstep` (+ `registry`/`depsdev`)
-→ `verdict` → `Report`. The CLI, Action, and dashboard are thin wrappers over `analyze()`.
+→ `verdict` → `Report`. The CLI, the Action and the dashboard are thin wrappers over `analyze()`.
 See [docs/spec.md](docs/spec.md) for the verdict logic and API details, and
-[docs/preflight-checklist.md](docs/preflight-checklist.md) for the broader dependency-hygiene
-practices this tool automates.
+[docs/preflight-checklist.md](docs/preflight-checklist.md) for the wider dependency-hygiene
+habits this tool automates.
 
 ## Policy gate
 
-By default `preflight check` (and the Action) fail on any new CVE. For finer control, drop a
-`preflight.config.json` and pass `--policy` (CLI) or set `policy-file:` (Action) — the same gate,
-evaluated by `@preflight/core`:
+By default, `preflight check` and the Action fail on any new CVE. For finer control, drop in a
+`preflight.config.json` and pass `--policy` (CLI) or set `policy-file:` (Action). It is the same
+gate either way, evaluated by `@preflight/core`:
 
 ```json
 {
@@ -246,51 +254,53 @@ evaluated by `@preflight/core`:
 ```
 
 - `vuln` — `"cve"` (any), `"kev"` (confirmed-exploited only), `"epss:0.5"` (exploit probability ≥ x),
-  or `"severity:medium"` (worst rated severity at/above the floor; unrated advisories count as
-  low, and a KEV'd advisory fails **any** floor — confirmed exploitation beats a severity label).
-- `installScript` / `suspiciousName` — fail on a dep that runs an install script / has a typosquat-like name.
-- `deprecated` — fail when a resolved version is deprecated upstream (npm `deprecated` / fully
+  or `"severity:medium"` (worst rated severity at or above the floor). Unrated advisories count as
+  low, and a KEV'd advisory fails **any** floor — confirmed exploitation beats a severity label.
+- `installScript` / `suspiciousName` — fail on a dep that runs an install script, or has a typosquat-like name.
+- `deprecated` — fail when a resolved version is deprecated upstream (npm `deprecated`, or fully
   yanked from PyPI).
-- `license` — fail on these license ids, or the buckets `"copyleft"` / `"unknown"`.
+- `license` — fail on these license ids, or on the buckets `"copyleft"` / `"unknown"`.
 - `minHealth` — fail if a *direct* dep's OpenSSF score is below this.
 - `runtime` — `"incompatible"` fails when a dep's range cannot install on the target runtime
-  (declared in `runtimes` or via flags); `"latest-dropped"` also fails the early warning (the
-  newest release dropped the runtime, so the next bump breaks). Without a policy, an explicit
-  `--node`/`--python` target failing to install exits non-zero; auto-detected targets
+  (declared in `runtimes` or via flags). `"latest-dropped"` also fails the early warning, where
+  the newest release dropped the runtime and the next bump breaks. Without a policy, an explicit
+  `--node`/`--python` target that fails to install exits non-zero; auto-detected targets
   (`.nvmrc`/`.python-version`) only warn.
-- `eolRuntime` — fail when the target runtime itself is past end-of-life (endoflife.date). A
-  report-level rule: the violation names the interpreter, not a dependency.
-- `unpinnedAction` — fail when a workflow `uses:` an action pinned to a mutable tag/branch
+- `eolRuntime` — fail when the target runtime itself is past end-of-life (endoflife.date). This is
+  a report-level rule: the violation names the interpreter, not a dependency.
+- `unpinnedAction` — fail when a workflow `uses:` an action pinned to a mutable tag or branch
   instead of a full commit SHA (only fires on workflow manifests).
 
-- `allow` — adjudicated exceptions that keep strict rules usable on real dependency trees:
+- `allow` — exceptions you have judged, which keep strict rules usable on real dependency trees.
   `installScripts` lists packages permitted to run install scripts (legitimate native binaries
-  like esbuild/sharp/fsevents), `advisories` lists GHSA/CVE ids accepted as unactionable (e.g.
-  vendored by a framework until it ships the fix). **Every allow that fires is announced** in
-  the output (`allowed: …`) — the gate says what it deliberately ignored, so exceptions never
-  rot invisibly. Malware is never suppressible.
+  like esbuild/sharp/fsevents); `advisories` lists GHSA/CVE ids accepted as unactionable, such as
+  one vendored by a framework until it ships the fix. **Every allow that fires is announced** in
+  the output (`allowed: …`) — the gate says what it deliberately ignored, so exceptions never rot
+  invisibly. Malware is never suppressible.
 
-Malicious packages always fail, regardless of config. `--policy` auto-enables the lookups its rules
-need (`license`/`deprecated` → latest version, `minHealth` → health), so you don't have to remember
-the flags.
+Malicious packages always fail, whatever the config says. `--policy` switches on the lookups its
+rules need (`license`/`deprecated` → latest version, `minHealth` → health), so you do not have to
+remember the flags.
 
-**Where the file lives:** the CLI resolves `preflight.config.json` relative to the directory you
-run it *from* (pass `--policy path/to/file.json` for anything else); the Action's `policy-file:`
-is relative to the repo root. In a monorepo, one root config passed explicitly is the simplest setup.
+**Where the file lives:** the CLI looks for `preflight.config.json` next to the directory you run
+it *from* (pass `--policy path/to/file.json` for anything else); the Action's `policy-file:` is
+relative to the repo root. In a monorepo, one root config passed explicitly is the simplest setup.
 
 ## Compliance exports (SBOM + SARIF)
 
-- **CycloneDX SBOM** — `preflight check --sbom [file]` emits a CycloneDX 1.6 JSON inventory of the
-  full dependency graph (with each vulnerability, EPSS score, and KEV flag attached) for
-  Dependency-Track, OSV-Scanner, or any SBOM-consuming tool.
-- **SARIF** — the Action writes `preflight.sarif` on every run; the bundled workflows upload it to
-  GitHub **code scanning**, so findings appear in the repo's Security tab with severity coloring.
+- **CycloneDX SBOM** — `preflight check --sbom [file]` writes a CycloneDX 1.6 JSON inventory of
+  the full dependency graph, with each vulnerability, EPSS score and KEV flag attached. An SBOM is
+  a parts list of everything your project ships; feed it to Dependency-Track, OSV-Scanner, or any
+  other tool that reads one.
+- **SARIF** — the Action writes `preflight.sarif` on every run. SARIF is the standard file format
+  code-scanning tools use to report findings. The bundled workflows upload it to GitHub **code
+  scanning**, so findings appear in the repo's Security tab with severity coloring.
 
 ## Keyless to run
 
-Every data source Preflight queries is **free, keyless, and accountless** — nothing to sign up for,
-no API key to store, no token to rotate. That's what lets it drop straight into any pipeline (local,
-CI, or the dashboard) with zero configuration.
+Every data source Preflight queries is **free, keyless, and accountless** — nothing to sign up
+for, no API key to store, no token to rotate. That is what lets it drop straight into any pipeline
+(local, CI, or the dashboard) with zero configuration.
 
 | Source | What Preflight gets from it | Endpoint |
 | --- | --- | --- |
@@ -305,64 +315,30 @@ CI, or the dashboard) with zero configuration.
 | **pypistats.org** | Weekly downloads for PyPI packages (same role) | `pypistats.org/api/packages/{p}/recent` |
 
 Every **successful** response is cached on disk for 24h (`~/.cache/preflight`; set
-`PREFLIGHT_CACHE_DIR` to override, or `--no-cache` to skip) to be a good API citizen and make
-re-runs instant. A *failed* fetch is never cached — if a source is unreachable, that scan is marked
-`degraded` (surfaced in the CLI and the PR comment) so a green result is never mistaken for
-"all clear" when, say, the KEV feed was down and exploited-status is actually unknown.
+`PREFLIGHT_CACHE_DIR` to override, or `--no-cache` to skip). That keeps Preflight a good API
+citizen and makes re-runs instant. A *failed* fetch is never cached. If a source is unreachable,
+that scan is marked `degraded` in the CLI and in the PR comment, so a green result is never
+mistaken for "all clear" when, say, the KEV feed was down and exploited-status is really unknown.
 
-> **Design principle:** every new check must be *quick, keyless, and accountless*. If a data source
-> needs an account or an API key, it doesn't belong here — that constraint is the whole point, and
-> it's what keeps Preflight a drop-in.
+> **Design principle:** every new check must be *quick, keyless, and accountless*. If a data
+> source needs an account or an API key, it does not belong here — that constraint is the whole
+> point, and it is what keeps Preflight a drop-in.
 
 ## Experience Gained
-- Designed a keyless supply-chain analysis **engine** (TypeScript, ESM npm-workspaces monorepo) over
-  the OSV, deps.dev, npm, and PyPI APIs — batched queries, a 24h on-disk cache, and a CVSS v3
-  base-score calculator — shipped as a standalone **CLI** bundled with tsup.
-- Built a **CI/CD security gate** as a GitHub Action (`@actions/*` toolkit + Octokit) that diffs
-  dependency changes on each pull request, posts an automated review comment, and fails the check on
-  a newly-introduced CVE — self-tested by running on its own PRs.
-- Shipped a **Next.js (App Router, React 19) dashboard** that analyzes a pasted manifest through a
-  Node route handler and renders a dark-mode-aware metric/findings view — one engine reused across a
-  CLI, a CI action, and a web app via a TypeScript workspace (`transpilePackages`).
-- Modeled framework **lockstep** version sets (Expo, Angular, Nx, Next.js, Nuxt, SvelteKit, Remix,
-  Astro) to produce upgrade guidance generic auto-updaters can't, and verified every external API
-  shape against live docs before coding.
-- Deepened it into a real supply-chain scanner: **whole-lockfile transitive** scanning, **risk-based
-  prioritization** (EPSS exploit-probability + CISA KEV) over CVSS, **malicious-package** detection,
-  **CycloneDX SBOM** + **SARIF** (GitHub Security tab) export, and a **scheduled cron re-scan** that
-  files an issue when a dependency becomes newly vulnerable — all keyless.
-- Added proactive, pre-CVE supply-chain signals: **install-script** detection, an **offline typosquat
-  heuristic** (Damerau-Levenshtein vs a bundled popular-package list), **license-risk** bucketing, and
-  an **OpenSSF Scorecard** per-check breakdown — the risk a vulnerability feed can't tell you about.
-- Unified every signal into a configurable **policy-as-code gate** (`preflight.config.json`) shared by
-  the CLI and the Action — one source of truth for what fails the build (denied license, install
-  script, typosquat, min-health floor, or a tunable CVE/KEV/EPSS threshold).
-- Expanded coverage across **six additional free data sources and formats** in one release train:
-  upstream **deprecation/yank** surfacing, **runtime end-of-life** detection (endoflife.date),
-  **Sigstore/SLSA build-provenance** verification badges (npm provenance + PyPI PEP 740 via
-  deps.dev), **download-count** enrichment that turns typosquat hunches into evidence,
-  **pnpm/yarn lockfile parsers** (full transitive graphs for all three JS package managers), and
-  **GitHub Actions workflow scanning** — including local advisory-range evaluation after a
-  known-positive probe proved OSV doesn't version-match that ecosystem server-side.
-- Extended the engine to **five language ecosystems** by writing lockfile/manifest parsers from the
-  format specifications — `Gemfile.lock` (Bundler), `go.mod` (Go modules), and `Cargo.lock` (Cargo
-  formats v1–v4, via a purpose-built TOML-subset reader rather than a new dependency) — each
-  validated against real open-source projects at two points in their history to prove the scan both
-  finds known vulnerabilities and stays clean when it should.
-- Made deliberate, documented **precision-vs-coverage calls** where a manifest can't answer the
-  question: local/path-sourced packages are excluded from advisory matching so an in-repo module
-  never inherits a public package's CVEs, and the Go standard library is scanned only from a
-  prescriptive `toolchain` directive — never inferred from a minimum-version `go` directive, which
-  would report compatibility-minded libraries as carrying an entire CVE backlog. Gaps are announced
-  in a per-run **data-source ledger** rather than passing silently as coverage.
-- Built a **mutation-testing harness** to prove every new check can actually fail — sabotage each
-  branch, confirm the suite catches it, restore from an in-memory snapshot with a checksum. It
-  surfaced four genuinely untested code paths, and one defect in the harness itself (an ambiguous
-  search pattern was sabotaging a different function than the one under test).
-- Curated an evidence-backed **known-bad version pair** registry for breakage no metadata can
-  express — e.g. `@types/react@19` ships **no peer dependency at all**, so package managers and
-  auto-updaters place it beside React 18 without complaint and the build stops compiling —
-  surfaced in scans and enforceable as a policy rule.
+- Built a keyless supply-chain scanner in TypeScript covering 5 language ecosystems plus GitHub
+  Actions workflows — whole-lockfile transitive scans over OSV, cached on disk for 24h.
+- Shipped one engine behind 3 surfaces: a tsup-bundled CLI, a GitHub Action that fails a PR on a
+  newly introduced CVE plus a weekly cron re-scan, and a Next.js App Router dashboard on React 19.
+- Ranked findings by real risk from 9 free data sources — EPSS exploit probability, CISA KEV, and
+  CVSS v3 base scores computed from raw vectors — and flagged malicious packages outright.
+- Modeled lockstep version sets for 13 frameworks (Expo, Angular, Nuxt, Prisma, Rails and more)
+  plus a curated known-bad-pair registry — breakage no package metadata can express.
+- Added 6 pre-CVE risk signals: install scripts, an offline typosquat heuristic, license buckets,
+  OpenSSF Scorecard, upstream deprecation or yank, and runtime end-of-life.
+- Unified every signal into one policy-as-code gate with 9 rule types, shared by the CLI and the
+  Action, and exported a CycloneDX 1.6 SBOM plus SARIF into GitHub's Security tab.
+- Built a mutation-testing harness over 315 test blocks across 30 test files; it exposed 4
+  untested code paths and 1 defect in the harness itself.
 
 ## License
 [MIT](LICENSE).
