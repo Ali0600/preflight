@@ -189,7 +189,7 @@ GitHub-repo OAuth. Full plan: [docs/roadmap.md](docs/roadmap.md), [docs/spec.md]
 - Build: `npm run build` (tsup → `dist` for core/cli/action; `next build` for web — all 4 workspaces)
 - Web: `npm run dev -w @preflight/web` (dashboard at `localhost:3000`; paste a manifest → `/api/analyze`)
 - Fleet scan: `npm run scan:repos` (`scripts/fleet-scan.mts` — read-only sweep of all `gh` repos; checks the repo root **+ one level down** so monorepo sub-projects like `mobile/`,`backend/` count; rollout plan in `docs/rollout.md`)
-- Demo: `npm run check -- ~/grocery-helper/mobile/package.json` → 10 Expo-pinned, 7 safe, 0 CVE.
+- Demo: `npm run check -- ~/projects/apps/grocery-helper/mobile/package.json` → 10 Expo-pinned, 7 safe, 0 CVE.
   `npm run check -- examples/requirements.txt --latest` → 4 CVE, 1 safe (exit 1).
 
 ## Conventions / gotchas

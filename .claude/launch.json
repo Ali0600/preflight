@@ -10,7 +10,7 @@
     {
       "name": "landing",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "/Users/ah/preflight-landing", "run", "dev", "--", "-p", "3939"],
+      "runtimeArgs": ["--prefix", "/Users/ah/projects/apps/preflight-landing", "run", "dev", "--", "-p", "3939"],
       "port": 3939
     }
   ]
